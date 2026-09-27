@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- Секреты: API-ключи никогда не коммитить ---
+keys.json
+**/keys.json
+
+# --- Мусор прошлых версий ---
+*.bak_*
+*.stale*
+*.rpyc.stale*
+_backup_*/
+
+# --- Рантайм-данные мода (создаются при запуске игры/сервера) ---
+memory/
+cache_tts/
+voice_play/
+log.txt
+*.log
+server_out.log
+settings_window_error.log
+tts_edge.log
+
+# --- Референсы и внутренние заметки (не для публичного репозитория) ---
+reference-*/
+ES-AI-Mod/Memory.md
+# описание для мастерской — не исходник, правится под каждый релиз
+ES-AI-Mod/docs/workshop_description.txt
+/settings_window.body
+/settings_window.py
+/settings_window_prev.py
+
+# --- ОС и редакторы ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

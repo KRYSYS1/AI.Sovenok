@@ -1,0 +1,10 @@
+# Нормализация переводов строк: в репозитории LF, на Windows — CRLF
+* text=auto
+
+# Бинарники не трогаем
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp3 binary
+*.ttf binary
+*.b64.part* binary
