@@ -62,6 +62,10 @@ init python:
             return True
         dirs = []
         try:
+            dirs.append(ES_AI_MOD_DIR)
+        except Exception:
+            pass
+        try:
             dirs.append(os.path.join(renpy.config.gamedir, "mods", "es_ai"))
         except Exception:
             pass

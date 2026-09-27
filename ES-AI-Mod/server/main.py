@@ -739,7 +739,7 @@ def _shutdown_server():
 def _print_banner():
     h = health()
     print("=" * 62)
-    print("  ES AI Server  |  %s:%s" % (cfg.get("host", "127.0.0.1"), cfg.get("port", 33147)))
+    print("  ES AI Server  |  %s:%s" % (cfg.get("host", "127.0.0.1"), cfg.get("port", 40310)))
     print("-" * 62)
     print("  LLM : %s (%s)%s" % (h["llm"]["model"], h["llm"]["url"],
                                  "" if h["llm"]["key_present"] else "  [БЕЗ КЛЮЧА — localhost-only]"))
@@ -758,13 +758,15 @@ def run_check():
     return 0
 
 
-OLD_DEFAULT_PORT = 4999  # совпадал с KCD2 AI NPC — теперь конфликт
+DEFAULT_PORT = 40310  # хвост id мастерской 3809240310
+# 4999 совпадал с KCD2 AI NPC; 33147 — прежний дефолт (по appid)
+OLD_DEFAULT_PORTS = (4999, 33147)
 
 
 def migrate_port():
-    """Разовый перенос с старого дефолта 4999 на 33147."""
-    if int(cfg.get("port", 0)) == OLD_DEFAULT_PORT:
-        cfg["port"] = 33147
+    """Разовый перенос со старых дефолтов (4999, 33147) на 40310."""
+    if int(cfg.get("port", 0)) in OLD_DEFAULT_PORTS:
+        cfg["port"] = DEFAULT_PORT
         config_loader.save_config()
 
 
@@ -779,7 +781,7 @@ def main():
         sys.exit(run_check())
     global _server
     host = cfg.get("host", "127.0.0.1")
-    port = int(cfg.get("port", 33147))
+    port = int(cfg.get("port", DEFAULT_PORT))
     _server = ThreadingHTTPServer((host, port), Handler)
     _print_banner()
     try:

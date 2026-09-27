@@ -163,7 +163,9 @@ def _already_running():
 
 
 def _server_port():
-    return int(cfg.get("port", 33147))
+    port = int(cfg.get("port", 40310))
+    # старые дефолты сервер при старте мигрирует на 40310 (main.migrate_port)
+    return 40310 if port in (4999, 33147) else port
 
 
 def _server_url():

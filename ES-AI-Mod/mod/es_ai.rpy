@@ -26,8 +26,36 @@ init -10 python:
     import urllib2
     import atexit
 
-    # Папка мода: game/mods/es_ai
-    ES_AI_MOD_DIR = os.path.normpath(os.path.join(config.gamedir, "mods", "es_ai"))
+    # Папка мода. Два варианта установки:
+    #   1) вручную/установщиком: game/mods/es_ai/        -> ассеты "mods/es_ai/..."
+    #   2) Steam Workshop: workshop/content/331470/<id>/  -> ассеты "..." (корень
+    #      папки мастерской сам входит в config.searchpath, см. renpy/main.py)
+    # ES_AI_REL — префикс для путей, которые открывает загрузчик Ren'Py.
+    def _es_ai_is_mod_dir(d):
+        try:
+            return ((os.path.exists(os.path.join(d, "es_ai.rpy"))
+                     or os.path.exists(os.path.join(d, "es_ai.rpyc")))
+                    and os.path.isdir(os.path.join(d, "server")))
+        except Exception:
+            return False
+
+    def _es_ai_find_mod_dir():
+        local = os.path.join(config.gamedir, "mods", "es_ai")
+        if _es_ai_is_mod_dir(local):
+            return os.path.normpath(os.path.abspath(local)), "mods/es_ai/"
+        for sp in list(config.searchpath or []):
+            try:
+                d = os.path.abspath(sp)
+            except Exception:
+                continue
+            sub = os.path.join(d, "mods", "es_ai")
+            if _es_ai_is_mod_dir(sub):
+                return os.path.normpath(sub), "mods/es_ai/"
+            if _es_ai_is_mod_dir(d):
+                return os.path.normpath(d), ""
+        return os.path.normpath(local), "mods/es_ai/"
+
+    ES_AI_MOD_DIR, ES_AI_REL = _es_ai_find_mod_dir()
     ES_AI_SERVER_DIR = os.path.join(ES_AI_MOD_DIR, "server")
     ES_AI_LOG_PATH = os.path.join(ES_AI_MOD_DIR, "log.txt")
 
@@ -211,11 +239,13 @@ init 10 python:
     ES_AI_TIMEOUT_LONG = 120
 
     def es_ai_server_url():
-        return persistent.es_ai_server_url or "http://127.0.0.1:33147"
+        return persistent.es_ai_server_url or "http://127.0.0.1:40310"
 
-    # 4999 совпадал с KCD2 AI NPC — разовый перенос на 33147
-    if persistent.es_ai_server_url is None or ":4999" in persistent.es_ai_server_url:
-        persistent.es_ai_server_url = "http://127.0.0.1:33147"
+    # Разовый перенос со старых дефолтов: 4999 (конфликт с KCD2 AI NPC) и 33147
+    if (persistent.es_ai_server_url is None
+            or ":4999" in persistent.es_ai_server_url
+            or ":33147" in persistent.es_ai_server_url):
+        persistent.es_ai_server_url = "http://127.0.0.1:40310"
 
     def es_ai_http(path, payload=None, timeout=ES_AI_TIMEOUT_LONG):
         """Синхронный запрос к серверу. Возвращает dict, кидает исключение."""
@@ -296,7 +326,7 @@ init 10 python:
             main_py = os.path.join(ES_AI_SERVER_DIR, "main.py")
             if not os.path.exists(main_py):
                 es_ai_server_state = "down"
-                es_ai_server_info = "нет папки server/ рядом с модом"
+                es_ai_server_info = "нет папки server/ рядом с модом (%s)" % ES_AI_SERVER_DIR
                 es_ai_log("autostart failed: no server/main.py")
                 return
 
@@ -330,7 +360,7 @@ init 10 python:
                     es_ai_log("server ready (autostart)")
                     return
             es_ai_server_state = "down"
-            es_ai_server_info = "сервер не отвечает (см. mods/es_ai/server/)"
+            es_ai_server_info = "сервер не отвечает (см. %s)" % ES_AI_SERVER_DIR
             es_ai_log("autostart timeout")
         except Exception as e:
             es_ai_server_state = "down"
@@ -351,7 +381,8 @@ init 10 python:
 
     atexit.register(es_ai_stop_autostart)
     es_ai_start_server_async()
-    es_ai_log("mod init, gamedir=%s" % config.gamedir)
+    es_ai_log("mod init, gamedir=%s, mod_dir=%s, rel=%r"
+              % (config.gamedir, ES_AI_MOD_DIR, ES_AI_REL))
 
 ################################################################################
 ## Аудио: регистрация TTS-канала + заплатка гонки аудиопотока Ren'Py 7.4

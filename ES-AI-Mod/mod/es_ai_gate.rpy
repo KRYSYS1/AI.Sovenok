@@ -12,9 +12,11 @@
 # показываем сами из interact-колбэка на слое "screens" (перепоказ каждый
 # интеракт держит калитку поверх экрана меню).
 
-init -10 python:
-    ES_GATE_IDLE = "mods/es_ai/gate/gate_idle.png"
-    ES_GATE_HOVER = "mods/es_ai/gate/gate_hover.png"
+init -9 python:
+    # ES_AI_REL: "mods/es_ai/" при ручной установке, "" в Steam Workshop
+    ES_GATE_IDLE = ES_AI_REL + "gate/gate_idle.png"
+    ES_GATE_HOVER = ES_AI_REL + "gate/gate_hover.png"
+    ES_GATE_SOUND = ES_AI_REL + "gate/sov.mp3"
     ES_GATE_XALIGN = 0.50    # картинка 1920x1080 — по центру, совпадает с фоном меню
     ES_GATE_YALIGN = 0.50
     ES_GATE_ZOOM = 1.0
@@ -68,7 +70,7 @@ screen es_ai_gate():
             idle Transform(ES_GATE_IDLE, zoom=ES_GATE_ZOOM)
             hover Transform(ES_GATE_HOVER, zoom=ES_GATE_ZOOM)
             focus_mask True
-            hover_sound "mods/es_ai/gate/sov.mp3"
+            hover_sound ES_GATE_SOUND
             action Jump(ES_GATE_HOVER_OPENS)
             xalign ES_GATE_XALIGN
             yalign ES_GATE_YALIGN

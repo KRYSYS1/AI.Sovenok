@@ -64,7 +64,7 @@ def install(game_dir, log):
     # Если сервер мода ещё жив — просим его завершиться и ждём (порт берём из его конфига)
     import time as _t
     import urllib.request as _ur
-    for _port in (33147, 4999):
+    for _port in (40310, 33147, 4999):
         try:
             _ur.urlopen(_ur.Request("http://127.0.0.1:%s/shutdown" % _port,
                                     data=b"{}", headers={"Content-Type": "application/json"}),

@@ -20,9 +20,11 @@ DETACHED = 0x00000008 if os.name == "nt" else 0
 def read_port():
     try:
         with open(os.path.join(DIR, "config.json"), "r", encoding="utf-8") as f:
-            return int(json.load(f).get("port", 33147))
+            port = int(json.load(f).get("port", 40310))
     except Exception:
-        return 33147
+        return 40310
+    # старые дефолты сервер при старте мигрирует на 40310 (main.migrate_port)
+    return 40310 if port in (4999, 33147) else port
 
 
 PORT = read_port()

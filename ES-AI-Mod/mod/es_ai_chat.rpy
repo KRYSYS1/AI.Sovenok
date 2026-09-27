@@ -58,7 +58,7 @@ label es_ai:
 
     if es_ai_server_state != "ready":
         "AI-сервер не отвечает: [es_ai_server_info!q]"
-        "Попробуй запустить сервер вручную: двойной клик по mods/es_ai/server/start_server.pyw"
+        "Попробуй запустить сервер вручную: двойной клик по start_server.pyw в папке [ES_AI_SERVER_DIR!q]"
         menu:
             "Что делать?"
             "Проверить связь ещё раз":

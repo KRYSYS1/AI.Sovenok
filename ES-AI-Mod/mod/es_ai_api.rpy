@@ -135,7 +135,7 @@ init 10 python:
             base = os.path.basename(path.replace("\\", "/"))
             dst = os.path.join(dst_dir, base)
             shutil.copyfile(path, dst)
-            return "mods/es_ai/voice_play/" + base
+            return ES_AI_REL + "voice_play/" + base
         except Exception as e:
             es_ai_log("tts copy error: %s" % e)
             return path
