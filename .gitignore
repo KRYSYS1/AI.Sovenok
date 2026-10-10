@@ -40,3 +40,9 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# --- Служебное Codebuff/Freebuff ---
+.freebuff/
+
+# --- Промежуточные копии автообновления (apply_to_pc.py) ---
+*.esai-new
