@@ -149,8 +149,9 @@ init -10 python:
          "desc": u"вы на площадке перед столовой лагеря, на улице"},
         {"id": "stage_big", "name": u"Большая сцена (концерт)", "context_only": True,
          "bgs": ["bg ext_stage_big_night"],
-         "time_bgs": {"day": ["bg ext_stage_big_night"],
-                      "sunset": ["bg ext_stage_big_night"],
+         # Big Stage has no daytime asset; reuse the ordinary stage without moving.
+         "time_bgs": {"day": ["bg ext_stage_normal_day"],
+                      "sunset": ["bg ext_stage_normal_sunset", "bg ext_stage_normal_day"],
                       "night": ["bg ext_stage_big_night"]}, "dress": None,
          "desc": u"вы у большой концертной сцены лагеря, готовится вечернее выступление"},
         {"id": "gate_no_bus", "name": u"Ворота (автобус уехал)", "context_only": True,
@@ -183,8 +184,111 @@ init -10 python:
     ES_AI_LOC_LAST_CHAR = [None]
     ES_AI_LOC_LAST_EMO = ["normal"]
     ES_AI_LOC_HAS_GIRL = [False]
-    ES_AI_TIME = ["day"]   # day | sunset | night
-    ES_AI_SHOWN = []       # показанные героини [{"id","emo"}], последняя в списке — в центре
+    ES_AI_TIME = ["day"]   # morning | day | sunset | night
+    ES_AI_CLOCK = dict(minutes=None, revision=None, enabled=False, lines=0, generation=0)
+
+    def es_ai_clock_settings():
+        import io
+        import os
+        import json
+        st = dict(enabled=False, start_time="08:00", minutes_per_exchange=5, revision=0)
+        try:
+            path = es_ai_user_config_path()
+        except NameError:
+            path = os.path.join(ES_AI_SERVER_DIR, "config.json")
+        try:
+            with io.open(path, "r", encoding="utf-8-sig") as stream:
+                data = json.load(stream)
+            raw = data.get("game_clock") if isinstance(data, _es_ai_cameo_builtins.dict) else None
+            if isinstance(raw, _es_ai_cameo_builtins.dict):
+                st.update((k, raw[k]) for k in st if k in raw)
+        except Exception:
+            pass
+        st["enabled"] = st["enabled"] is True
+        try:
+            parts = st["start_time"].strip().split(":")
+            hour, minute = (int(p) for p in parts)
+            if len(parts[0]) not in (1, 2) or len(parts[1]) != 2 or not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError("HH:MM")
+            st["start_time"] = "%02d:%02d" % (hour, minute)
+        except Exception:
+            st["start_time"] = "08:00"
+        for key, default, upper in (("minutes_per_exchange", 5, 120), ("revision", 0, None)):
+            try:
+                value = st[key]
+                if isinstance(value, _es_ai_cameo_builtins.bool):
+                    raise ValueError(key)
+                value = int(value)
+                st[key] = _es_ai_cameo_builtins.max(0, value)
+                if upper is not None:
+                    st[key] = _es_ai_cameo_builtins.min(upper, st[key])
+            except Exception:
+                st[key] = default
+        return st
+
+    def es_ai_clock_phase(minutes):
+        hour = (minutes % 1440) // 60
+        if 6 <= hour < 10:
+            return "morning"
+        if 10 <= hour < 18:
+            return "day"
+        if 18 <= hour < 22:
+            return "sunset"
+        return "night"
+
+    def es_ai_apply_time_phase(phase, redraw=True, force=False):
+        changed = ES_AI_TIME[0] != phase
+        ES_AI_TIME[0] = phase
+        visual = "day" if phase == "morning" else phase
+        if changed or force:
+            persistent.sprite_time = visual
+            fn = globals().get(visual + "_time")
+            if callable(fn):
+                fn()
+        if changed and redraw:
+            # No movement, NPC lifecycle, context reset, or layout reroll.
+            renpy.scene()
+            renpy.show(es_ai_loc_bg(es_ai_location()))
+            es_ai_refresh_girls()
+            renpy.with_statement(dissolve)
+
+    def es_ai_clock_sync(redraw=True, force=False):
+        st = es_ai_clock_settings()
+        was_enabled = ES_AI_CLOCK["enabled"]
+        ES_AI_CLOCK["enabled"] = st["enabled"]
+        if was_enabled != st["enabled"]:
+            ES_AI_CLOCK["generation"] += 1
+        if st["enabled"]:
+            if ES_AI_CLOCK["minutes"] is None or ES_AI_CLOCK["revision"] != st["revision"]:
+                hour, minute = (int(p) for p in st["start_time"].split(":"))
+                ES_AI_CLOCK["minutes"] = hour * 60 + minute
+                ES_AI_CLOCK["revision"] = st["revision"]
+                ES_AI_CLOCK["generation"] += 1
+            es_ai_apply_time_phase(es_ai_clock_phase(ES_AI_CLOCK["minutes"]), redraw,
+                                   force or not was_enabled)
+        return st
+
+    def es_ai_clock_snapshot():
+        minutes = ES_AI_CLOCK["minutes"]
+        return dict(enabled=ES_AI_CLOCK["enabled"],
+                    time="%02d:%02d" % (minutes // 60, minutes % 60) if minutes is not None else "08:00",
+                    phase=ES_AI_TIME[0])
+
+    def es_ai_clock_text():
+        return es_ai_clock_snapshot()["time"] if ES_AI_CLOCK["enabled"] else ""
+
+    def es_ai_clock_begin(redraw=True):
+        es_ai_clock_sync(redraw=redraw)
+        return (ES_AI_CLOCK["revision"], ES_AI_CLOCK["enabled"], ES_AI_CLOCK["generation"])
+
+    def es_ai_clock_complete(lines_before, token):
+        st = es_ai_clock_sync()
+        current = (ES_AI_CLOCK["revision"], ES_AI_CLOCK["enabled"], ES_AI_CLOCK["generation"])
+        if token == current and st["enabled"] and ES_AI_CLOCK["lines"] > lines_before:
+            ES_AI_CLOCK["minutes"] = (ES_AI_CLOCK["minutes"] + st["minutes_per_exchange"]) % 1440
+            es_ai_apply_time_phase(es_ai_clock_phase(ES_AI_CLOCK["minutes"]))
+    ES_AI_SHOWN = []       # All current participants; list order does not set positions.
+    ES_AI_GIRL_LAYOUT = [None, {}]  # Last (location, sorted IDs, primary ID) and slots.
     ES_AI_DRESS = [None]   # контекстный наряд В ПРЕДЕЛАХ локации: None|"swim"|"cover"|"sport"
 
     # --- Карта лагеря (соседство локаций): переходы должны быть логичны ---
@@ -241,34 +345,71 @@ init -10 python:
 
     def es_ai_girls_reset():
         ES_AI_SHOWN[:] = []
+        ES_AI_GIRL_LAYOUT[:] = [None, {}]
+        # Состояние «остающихся» камео и хвост реплик — тоже с нуля.
+        try:
+            ES_AI_CAMEO_ACTIVE[:] = []
+            ES_AI_CAMEO_NEARBY.clear()
+        except Exception:
+            pass
+        try:
+            del ES_AI_RECENT_LINES[:]
+        except Exception:
+            pass
+        try:
+            ES_AI_CAMEO_CD[0] = 0
+        except Exception:
+            pass
 
     def es_ai_refresh_girls():
-        """Показать всех героинь списка: несколько персонажей распределяются по
-        ширине экрана без наложения (последняя добавленная — правее). Если больше
-        трёх — самые ранние скрываются."""
-        while len(ES_AI_SHOWN) > 3:
-            gone = ES_AI_SHOWN.pop(0)
-            try:
-                renpy.hide(gone["id"])
-            except Exception:
-                pass
-        n = len(ES_AI_SHOWN)
-        for i, g in enumerate(ES_AI_SHOWN):
-            if n == 1:
-                x = 0.5
+        """Show every participant in stable, screen-wide, overlapping rows."""
+        ids = sorted(g["id"] for g in ES_AI_SHOWN)
+        main = next((g["id"] for g in ES_AI_SHOWN if not g.get("cameo")), None)
+        key = (ES_AI_LOC_CUR[0], tuple(ids), main)
+        if ES_AI_GIRL_LAYOUT[0] != key:
+            n = len(ids)
+            if n == 0:
+                positions = []
+            elif n == 1:
+                positions = [0.5]
+            elif n in (2, 3):
+                clustered = _es_random.random() < 0.30
+                positions = ([0.35, 0.65] if clustered else [0.18, 0.82]) if n == 2 else (
+                    [0.30, 0.50, 0.70] if clustered else [0.13, 0.50, 0.87])
+                positions = [x + _es_random.uniform(-0.015, 0.015) for x in positions]
+            elif n == 4:
+                positions = [0.13, 0.36, 0.64, 0.87]
             else:
-                x = (i + 1.0) / (n + 1.0)   # равномерно, без наложения
-            # У камео-персонажа собственная (обычная) одежда, а не наряд локации:
-            # зашедшая героиня не должна оказаться в купальнике.
+                positions = [0.13, 0.38, 0.64, 0.87]
+            front = [(x, 0.88 if n > 4 else 1.0, 0, 1000) for x in positions]
+            rear_count = n - len(front)
+            rear_positions = {1: [0.50], 2: [0.24, 0.76], 3: [0.08, 0.50, 0.92]}
+            rear = [(x, 0.75, -25, 0) for x in rear_positions.get(rear_count, [])]
+            slots = front + rear
+            layout = {}
+            if main is not None:
+                # Reserve the nearest-to-center foreground slot for the heroine.
+                center = _es_ai_cameo_builtins.min(range(len(front)),
+                    key=lambda i: abs(front[i][0] - 0.5))
+                layout[main] = slots.pop(center)
+            others = [cid for cid in ids if cid != main]
+            _es_random.shuffle(others)
+            layout.update(zip(others, slots))
+            ES_AI_GIRL_LAYOUT[:] = [key, layout]
+        for g in ES_AI_SHOWN:
+            x, zoom, yoffset, row_z = ES_AI_GIRL_LAYOUT[1][g["id"]]
+            # Cameos keep per-NPC clothing, including water-location swim defaults,
+            # independently of the active heroine's contextual dress.
             dp = g["dress"] if ("dress" in g) else es_ai_loc_dress_pref()
             tag = es_ai_resolve_sprite(g["id"], g["emo"], dress_pref=dp)
             g["tag"] = tag
             if tag:
-                # Кто ниже ростом — тот на переднем плане (больше zorder), чтобы
-                # низкие персонажи (Ульяна) не терялись за высокими при наложении.
-                z = 300 - ES_AI_HEIGHTS.get(g["id"], 160)
+                # Focus clears every row without changing the speaker's slot.
+                z = row_z + 300 - ES_AI_HEIGHTS.get(g["id"], 160)
+                z += 2000 if g.get("focused") else (50 if not g.get("cameo") else 0)
                 try:
-                    renpy.show(tag, at_list=[Position(xalign=x, yalign=1.0)], zorder=z)
+                    renpy.show(tag, at_list=[Transform(xpos=float(x), xanchor=0.5,
+                        yalign=1.0, zoom=zoom, yoffset=yoffset)], zorder=z)
                 except Exception as e:
                     es_ai_log("girl show error: %s" % e)
 
@@ -279,27 +420,39 @@ init -10 python:
         renpy.show() не заменяет прошлый спрайт автоматически.
         """
         current_emo = emotion or "normal"
+        if any(not g.get("cameo") and g["id"] != char_id for g in ES_AI_SHOWN):
+            es_ai_cameo_clear()
         for g in ES_AI_SHOWN:
             if g.get("id") == char_id and not emotion:
                 current_emo = g.get("emo") or "normal"
 
-        # Скрываем все остальные теги персонажей, включая оставшиеся от
-        # предыдущей сессии/версии мода, и храним только активную героиню.
+        # Оставшиеся в сцене камео не уходят, когда говорит героиня: их записи
+        # и спрайты сохраняем, прячем только «чужие» теги.
+        keep = [g for g in ES_AI_SHOWN if g.get("cameo") and g["id"] != char_id]
+        es_ai_cameo_unregister(char_id)
+        es_ai_cameo_take_nearby(char_id)
+        staying = set(g["id"] for g in keep)
         for cid, _name, _color in ES_AI_CHARS:
-            if cid != char_id:
+            if cid != char_id and cid not in staying:
                 try:
                     renpy.hide(cid)
                 except Exception:
                     pass
-        ES_AI_SHOWN[:] = [{"id": char_id, "emo": current_emo}]
+        ES_AI_SHOWN[:] = [{"id": char_id, "emo": current_emo}] + keep
+        for g in ES_AI_SHOWN:
+            g.pop("focused", None)
         ES_AI_LOC_HAS_GIRL[0] = True
         es_ai_refresh_girls()
 
     def es_ai_set_time(t):
-        if t in ("day", "sunset", "night"):
-            ES_AI_TIME[0] = t
-            es_ai_set_location(ES_AI_LOC_CUR[0], ES_AI_LOC_LAST_CHAR[0],
-                               ES_AI_LOC_LAST_EMO[0])
+        if ES_AI_CLOCK["enabled"]:
+            return
+        t = unicode(t or "").strip().lower()
+        phase = {"morning": "morning", u"утро": "morning", "day": "day", u"день": "day",
+                 "sunset": "sunset", "evening": "sunset", u"вечер": "sunset", u"закат": "sunset",
+                 "night": "night", u"ночь": "night"}.get(t)
+        if phase:
+            es_ai_apply_time_phase(phase)
 
     # Список, а не dict: порядок важен для пересекающихся фраз
     # («автобус у ворот» должен определиться раньше просто «ворот»).
@@ -401,12 +554,20 @@ init -10 python:
         es_ai_log("location action: goto=%r fallback=%r current=%s" %
                   (goto_raw, loc_id, ES_AI_LOC_CUR[0]))
         if loc_id and loc_id != ES_AI_LOC_CUR[0]:
+            requested = res.get("cameo", [])
+            eligible = set(c[0] for c in ES_AI_CHARS) - {ES_AI_LOC_LAST_CHAR[0]}
+            explicit_arrival = (isinstance(requested, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple))
+                                and any(isinstance(c, basestring) and c in eligible for c in requested)
+                                and es_ai_cameo_on())
+            leaving = res.get("cameo_leave", [])
+            farewell = isinstance(leaving, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)) and bool(leaving)
             es_ai_set_location(loc_id, ES_AI_LOC_LAST_CHAR[0],
-                               ES_AI_LOC_LAST_EMO[0])
+                               ES_AI_LOC_LAST_EMO[0], cameo_arrive=not (explicit_arrival or farewell),
+                               travel_all=res.get("travel_all") is True)
             es_ai_log("location changed: %s" % loc_id)
         tm = res.get("time")
-        if tm:
-            es_ai_set_time(str(tm).lower())
+        if tm and not ES_AI_CLOCK["enabled"]:
+            es_ai_set_time(tm)
         # Наряд по контексту: сначала явный тег сервера [action:dress:...],
         # иначе — клиентский разбор реплик и настроения. Делается ПОСЛЕ смены
         # локации, чтобы учитывать базовый наряд уже нового места.
@@ -422,10 +583,25 @@ init -10 python:
         return ES_AI_LOCATION_INDEX.get(ES_AI_LOC_CUR[0], ES_AI_LOCATION_INDEX["square"])
 
     def es_ai_loc_bg(loc):
-        suffix = {"day": "day", "sunset": "sunset", "night": "night"}[ES_AI_TIME[0]]
+        suffix = {"morning": "day", "day": "day", "sunset": "sunset", "night": "night"}[ES_AI_TIME[0]]
         # Для фонов без суффикса _day (например ext_bus) задаём варианты явно.
-        explicit = loc.get("time_bgs", {}).get(ES_AI_TIME[0], [])
+        explicit = loc.get("time_bgs", {}).get(suffix, [])
         out = list(explicit)
+        if suffix == "sunset":
+            # Daytime sunset placeholders must not hide available night assets.
+            out = [bg for bg in explicit if "_sunset" in bg]
+            for bg in loc["bgs"]:
+                if "_day" in bg:
+                    out.append(bg.replace("_day", "_sunset"))
+                elif "_sunset" in bg:
+                    out.append(bg)
+            out.extend(loc.get("time_bgs", {}).get("night", []))
+            for bg in loc["bgs"]:
+                if "_day" in bg:
+                    out.append(bg.replace("_day", "_night"))
+                elif "_night" in bg:
+                    out.append(bg)
+            out.extend(explicit)
         for bg in loc["bgs"]:
             if suffix != "day" and "_day" in bg:
                 out.append(bg.replace("_day", "_" + suffix))
@@ -522,16 +698,37 @@ init 10 python:
         es_ai_set_location(loc_id, char_id=ES_AI_LOC_LAST_CHAR[0],
                            emotion=ES_AI_LOC_LAST_EMO[0])
 
-    def es_ai_set_location(loc_id, char_id=None, emotion=None):
+    def es_ai_set_location(loc_id, char_id=None, emotion=None, cameo_arrive=True, travel_all=False):
         """Сменить локацию: фон + вернуть героиню в подходящей одежде."""
         loc = ES_AI_LOCATION_INDEX.get(loc_id)
         if not loc:
             return
+        changed = loc["id"] != ES_AI_LOC_CUR[0]
         # Новая локация -> вернуть базовый наряд (у воды это купальник).
         # При простом обновлении фона (смена времени суток) наряд не сбрасываем.
-        if loc["id"] != ES_AI_LOC_CUR[0]:
+        if changed:
+            if not travel_all:
+                for g in _es_ai_cameo_builtins.list(ES_AI_SHOWN):
+                    if g.get("cameo"):
+                        es_ai_cameo_park(g["id"], announce=False)
+            for g in ES_AI_SHOWN:
+                es_ai_cameo_take_nearby(g["id"])
             ES_AI_DRESS[0] = None
+            try:
+                ES_AI_RECENT_LINES[:] = []
+            except Exception:
+                pass
         ES_AI_LOC_CUR[0] = loc["id"]
+        if changed:
+            for g in ES_AI_SHOWN:
+                if g.get("cameo"):
+                    g["dress"] = es_ai_cameo_dress()
+            if ES_AI_SHOWN:
+                es_ai_recent_push("Narrator", "The company moved together to %s: %s." %
+                    (loc["id"], ", ".join(es_ai_cameo_name(g["id"]) for g in ES_AI_SHOWN)))
+            for record in ES_AI_CAMEO_NEARBY.get(loc["id"], []):
+                es_ai_recent_push("Narrator", u"%s: остаётся неподалёку, вне разговора. %s" %
+                    (es_ai_cameo_name(record["id"]), record.get("activity", u"")))
         try:
             es_ai_report_loc(loc["id"])
         except Exception:
@@ -541,4 +738,9 @@ init 10 python:
         if ES_AI_SHOWN:
             es_ai_refresh_girls()
         renpy.with_statement(dissolve)
-
+        if changed and cameo_arrive:
+            # При входе в локацию кто-то может уже быть на месте.
+            try:
+                es_ai_cameo_on_arrive()
+            except Exception:
+                pass

@@ -22,6 +22,8 @@ screen es_ai_status_badge:
         background Frame("#000000aa", 4, 4)
         hbox:
             spacing 8
+            if es_ai_clock_text():
+                text "[es_ai_clock_text()]" size 18 color "#eeeeee" yalign 0.5
             if es_ai_server_state == "ready":
                 text "●" size 20 color "#7CFC00" yalign 0.5
                 text "AI: онлайн" size 18 color "#eeeeee" yalign 0.5
@@ -195,7 +197,10 @@ screen es_ai_settings:
                             spacing 8
                             text "Сцена" size 26 color "#7ec8ff"
                             textbutton (("[X] " if persistent.es_ai_cameo else "[  ] ") + "Случайные появления других персонажей") action Function(es_ai_toggle_cameo)
-                            text "Иногда в сцену заходит другой персонаж (как в сюжете): вероятнее в романтический момент и в «своей» комнате." size 16 color "#8a97a6"
+                            $ _cst = es_ai_read_cameo_settings()
+                            textbutton (( "[X] " if _cst["cameo_stay"] else "[  ] " ) + "Остаются в сцене и вклиниваются в разговор") action Function(es_ai_toggle_cameo_stay)
+                            textbutton "Частота появлений: %d%% — нажми, чтобы по кругу" % _cst["cameo_freq"] action Function(es_ai_cycle_cameo_freq)
+                            text "Заходят случайные персонажи (иногда парами), говорят в тему или без контекста, могут остаться в сцене. Подробные ползунки — в окне «Настройки AI»." size 16 color "#8a97a6"
                             textbutton "🗺 Карта лагеря — кто где бывает" action Show("es_ai_map")
 
                     ######################################### Компоненты ##

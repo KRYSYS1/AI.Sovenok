@@ -39,8 +39,9 @@ init 10 python:
 label es_ai:
     $ es_ai_chat_active[0] = True
     $ es_ai_menu_hide()
-    $ day_time()
-    $ persistent.sprite_time = "day"
+    $ es_ai_clock_sync(redraw=False, force=True)
+    if not ES_AI_CLOCK["enabled"]:
+        $ es_ai_apply_time_phase("day", redraw=False, force=True)
     play ambience ambience_camp_center_day
     play music music_list["my_daily_life"] fadein 1
     show screen es_ai_tts_player
@@ -164,6 +165,7 @@ label es_ai_settings_loop:
 ################################################################################
 
 label es_ai_chat_loop:
+    $ es_ai_clock_sync()
     menu:
         "Что будешь делать?"
         "Сказать что-нибудь":
@@ -196,6 +198,7 @@ label es_ai_chat_loop:
             jump es_ai_leave
 
 label es_ai_chat_input:
+    $ es_ai_clock_sync()
     $ _inp = renpy.input(u"Что скажешь %s? (пустой Enter — меню)" % es_ai_who_name,
                           default=es_ai_voice_text, length=200).strip()
     $ es_ai_voice_text = ""
@@ -211,9 +214,12 @@ label es_ai_chat_input:
         "Сервер не ответил: [es_ai_last_error!q]"
         jump es_ai_chat_input
 
+    $ _clock_lines = ES_AI_CLOCK["lines"]
     $ es_ai_apply_actions(_res, _inp)
-    $ es_ai_say_girl(es_ai_char_id, _res.get("reply", ""), _res.get("emotion"))
+    if not _res.get("suppress_main_reply", False):
+        $ es_ai_say_girl(es_ai_char_id, _res.get("reply", ""), _res.get("emotion"))
     $ es_ai_try_cameo(es_ai_char_id, _inp, _res)
+    $ es_ai_clock_complete(_clock_lines, _res.get("_clock_revision"))
     jump es_ai_chat_input
 
 ################################################################################
@@ -254,9 +260,12 @@ label es_ai_chat_initiative:
     if _ini is None:
         "Сервер не ответил: [es_ai_last_error!q]"
     else:
+        $ _clock_lines = ES_AI_CLOCK["lines"]
         $ es_ai_apply_actions(_ini)
-        $ es_ai_say_girl(es_ai_char_id, _ini.get("reply", ""), _ini.get("emotion"))
+        if not _ini.get("suppress_main_reply", False):
+            $ es_ai_say_girl(es_ai_char_id, _ini.get("reply", ""), _ini.get("emotion"))
         $ es_ai_try_cameo(es_ai_char_id, "", _ini)
+        $ es_ai_clock_complete(_clock_lines, _ini.get("_clock_revision"))
 
     jump es_ai_chat_input
 

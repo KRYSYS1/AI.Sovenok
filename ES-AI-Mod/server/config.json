@@ -45,5 +45,11 @@
   "novel": {
     "max_context_lines": 24,
     "reply_max_sentences": 4
-  }
+  },
+  "cameo_freq": 25,
+  "cameo_stay": true,
+  "cameo_stay_lines": 2,
+  "cameo_interject": 35,
+  "cameo_ctx": 70,
+  "cameo_max_extra": 2
 }

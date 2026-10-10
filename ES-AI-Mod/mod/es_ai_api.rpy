@@ -41,15 +41,19 @@ init 10 python:
     # ---------------------------------------------------------- запросы ----
 
     def es_ai_chat_async(char_id, text, novel_context=None, speaker=""):
+        clock_token = es_ai_clock_begin(redraw=es_ai_chat_active[0])
         payload = {"character": char_id, "text": text,
-                   "novel_context": novel_context or [], "speaker": speaker}
+                   "novel_context": novel_context or [], "speaker": speaker,
+                   "clock": es_ai_clock_snapshot()}
         if es_ai_chat_active[0]:
             payload["location"] = es_ai_location_context()
+            payload["scene"] = es_ai_scene_snapshot(char_id)
 
         def fn():
             r = es_ai_http("/chat", payload)
             if not r.get("ok"):
                 raise Exception(r.get("error", "неизвестная ошибка сервера"))
+            r["_clock_revision"] = clock_token
             return r
 
         return es_ai_run_async("chat", fn)
@@ -76,14 +80,18 @@ init 10 python:
             pass
 
     def es_ai_initiative_async(char_id, novel_context=None):
-        payload = {"character": char_id, "novel_context": novel_context or []}
+        clock_token = es_ai_clock_begin(redraw=es_ai_chat_active[0])
+        payload = {"character": char_id, "novel_context": novel_context or [],
+                   "clock": es_ai_clock_snapshot()}
         if es_ai_chat_active[0]:
             payload["location"] = es_ai_location_context()
+            payload["scene"] = es_ai_scene_snapshot(char_id)
 
         def fn():
             r = es_ai_http("/initiative", payload)
             if not r.get("ok"):
                 raise Exception(r.get("error", "неизвестная ошибка сервера"))
+            r["_clock_revision"] = clock_token
             return r
 
         return es_ai_run_async("initiative", fn)
@@ -448,6 +456,7 @@ init 10 python:
         es_ai_internal_speaking[0] = True
         try:
             es_ai_speakers[char_id](safe)
+            ES_AI_CLOCK["lines"] += 1
         finally:
             es_ai_internal_speaking[0] = False
 
@@ -653,5 +662,3 @@ init 11 python:
         if not info.get("present"):
             return u"(не задан)"
         return u"\u2022\u2022\u2022\u2022" + (info.get("tail") or "")
-
-

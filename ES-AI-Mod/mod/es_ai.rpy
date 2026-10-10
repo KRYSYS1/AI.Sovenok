@@ -9,8 +9,15 @@
 ## Регистрация в меню модов Бесконечного лета
 ################################################################################
 
-init 1 python:
-    mods["es_ai"] = "AI Совёнок"
+# NB: ES создаёт словарь mods в своём game/script.rpy, а он лежит внутри archive.rpa.
+# Ren'Py добавляет папку предмета мастерской в config.searchpath (renpy/main.py),
+# но грузит её РАНЬШЕ архива — на init 1 словаря mods ещё нет (NameError).
+# Поэтому регистрируемся позже и с защитой.
+init 999 python:
+    try:
+        mods["es_ai"] = "AI Совёнок"
+    except NameError:
+        pass
 
 ################################################################################
 ## Константы и настройки
@@ -170,6 +177,12 @@ init -10 python:
             if key not in vocab:
                 emotion = es_ai_fallback_emotion(char_id, key)
         candidates = []
+        if dress_pref:
+            for emo in (emotion, "normal"):
+                base = "%s %s %s" % (char_id, emo, dress_pref)
+                for tag in (base + " close", base):
+                    if renpy.has_image(tag):
+                        return tag
         # Виола (cs): нет тега pioneer, есть вариант со стетоскопом.
         if char_id == "cs":
             candidates.append("%s %s stethoscope close" % (char_id, emotion))

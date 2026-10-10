@@ -7,7 +7,7 @@
 комбо-список моделей прямо из поля «Модель» (лупа справа в поле),
 вставка по правому клику, растягиваемое окно с живой раскладкой.
 
-Вкладки: Нейросеть / Голос / Микрофон / Промпты / История / Карта.
+Вкладки: Нейросеть / Голос / Микрофон / Погружение / История / Карта.
 Редактирует server/config.json, server/keys.json, es_characters.json
 (персоны + ГГ), затем POST /reload работающему серверу.
 
@@ -42,7 +42,7 @@ ui_lang = [cfg.get("ui_lang") if cfg.get("ui_lang") in ("ru", "en") else "ru"]
 
 
 def tr(text):
-    return ui_i18n.tr(text, ui_lang[0])
+    return ui_i18n.tr(text() if callable(text) else text, ui_lang[0])
 keys = config_loader.keys
 
 # ---------------------------------------------------------------- провайдеры --
@@ -307,8 +307,15 @@ def _compose_background(w, h):
     if not HAVE_PIL:
         return None
     try:
-        src = os.path.join(BASE_DIR, "ui", "bg_settings.jpg")
-        if os.path.exists(src):
+        # Фон окна в разных версиях мода лежал и как .jpg, и как .png
+        # (пользователь менял картинку, имя оставлял) — принимаем любой вариант
+        src = None
+        for _name in ("bg_settings.jpg", "bg_settings.jpeg", "bg_settings.png"):
+            _cand = os.path.join(BASE_DIR, "ui", _name)
+            if os.path.exists(_cand):
+                src = _cand
+                break
+        if src:
             img = Image.open(src).convert("RGB")
             scale = max(float(w) / img.width, float(h) / img.height)
             img = img.resize((int(img.width * scale) + 1, int(img.height * scale) + 1), Image.LANCZOS)
@@ -928,6 +935,9 @@ def run_settings_window():
 
     # ----------------------------------------------------------- действия ---
     def save_all(notify=True):
+        clock = clock_values()
+        if clock is None:
+            return False
         llm_cfg["provider"] = {v: k for k, v in prov_display.items()}[llm_provider_var.get()]
         llm_cfg["api_url"] = url_var.get().strip()
         llm_cfg["model"] = model_var.get().strip()
@@ -940,6 +950,11 @@ def run_settings_window():
             llm_cfg["custom_api_url"] = url_var.get().strip()
             llm_cfg["custom_model"] = model_var.get().strip()
         cfg["cameo_enabled"] = bool(cameo_on[0])
+        cfg["cameo_stay"] = bool(cameo_on[0])
+        cfg["cameo_freq"] = int(cameo_freq_var.get())
+        cfg["cameo_stay_lines"] = int(cameo_lines_var.get())
+        cfg["cameo_interject"] = int(cameo_interject_var.get())
+        cfg["cameo_ctx"] = int(cameo_ctx_var.get())
         cfg["ui_lang"] = ui_lang[0]
         tts_cfg["provider"] = TTS_MAP[tts_var.get()]
         tts_cfg["custom_tts_url"] = custom_tts_var.get().strip()
@@ -973,6 +988,19 @@ def run_settings_window():
         stt_cfg["provider"] = STT_MAP[stt_var.get()]
         for name in key_vars:
             keys[name] = key_vars[name].get().strip()
+        cfg["game_clock"] = clock
+        cfg["story_events"] = dict(enabled=bool(story_on[0]), intensity=story_intensity[0])
+        # The player name is edited in the immersion tab but must follow the
+        # main Save button too, otherwise the running server keeps the old name.
+        try:
+            player = dict(prompt_data.get("player") or {})
+            player["id"] = "player"
+            player["name"] = player_name_var.get().strip() or u"Семён"
+            prompt_data["player"] = player
+            with open(chars_path, "w", encoding="utf-8") as f:
+                json.dump(prompt_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
         config_loader.save_config()
         config_loader.save_keys()
         try:
@@ -1261,6 +1289,14 @@ def run_settings_window():
         want_keys = r["vals"]["keys"]
         if not want_settings and not want_keys:
             return
+        if want_settings:
+            story_on[0] = False
+            story_sw.set_on(False)
+            select_story_intensity("low")
+            clock_on[0] = False
+            clock_sw.set_on(False)
+            clock_time_var.set("08:00")
+            clock_step_var.set("5")
         llm_provider_var.set(DEFAULTS["provider"])
         url, model, _kn = LLM_PRESETS[DEFAULTS["provider"]]
         url_var.set(url)
@@ -1290,6 +1326,14 @@ def run_settings_window():
         cu_voice_m_var.set("onyx")
         cameo_on[0] = True
         cameo_sw.set_on(True)
+        cameo_freq_var.set(25)
+        cf_val.set(u"25%")
+        cameo_lines_var.set(2)
+        cl_val.set(u"2")
+        cameo_interject_var.set(35)
+        ci_val.set(u"35%")
+        cameo_ctx_var.set(70)
+        cx_val.set(u"70%")
         if want_keys:
             for k in key_vars:
                 key_vars[k].set(u"")
@@ -1418,7 +1462,7 @@ def run_settings_window():
         layout()
 
     tabs = [Chip(n, (lambda i=i: switch_tab(i)), kind="tab", font=FTAB, h=32, padx=10, managed=False)
-            for i, n in enumerate([u"Нейросеть", u"Голос", u"Микрофон", u"Промпты", u"История", u"Карта"])]
+            for i, n in enumerate([u"Нейросеть", u"Голос", u"Микрофон", u"Погружение", u"История", u"Карта"])]
     tabs[0].set_selected(True)
 
     # ----------------------------------------------------- общие хелперы ---
@@ -1758,6 +1802,11 @@ def run_settings_window():
     def _outside_click(e):
         if e.widget in (mag_icon, model_entry) or e.widget in lookup_icons:
             return
+        focused = root.focus_get()
+        if (focused in (clock_time_f.widget, clock_step_f.widget) and
+                not isinstance(e.widget, (tk.Entry, tk.Text))):
+            focused.selection_clear()
+            root.focus_set()
         close_models()
         close_lookup()
     root.bind("<Button-1>", _outside_click, add=True)
@@ -2279,17 +2328,163 @@ def run_settings_window():
         stt_test.place(x0, y)
         result_txt["stt"].place(x0 + stt_test.nat_w + 16, y + H / 2.0, width=cw - stt_test.nat_w - 16)
 
-    # ============================================== вкладка 3: Промпты ======
+    # ============================================== вкладка 3: Погружение ===
     chars_path = os.path.join(BASE_DIR, "es_characters.json")
     try:
         with open(chars_path, encoding="utf-8") as f:
             prompt_data = json.load(f)
     except Exception:
         prompt_data = {"characters": [], "player": {}}
+    player_name_var.set((prompt_data.get("player") or {}).get("name", u"Семён"))
     prompt_targets = [(c["id"], c["name"], False) for c in prompt_data.get("characters", [])]
     prompt_targets.append(("player",
-                           (prompt_data.get("player") or {}).get("name", u"Семён") + u" (ГГ)", True))
+                           (prompt_data.get("player") or {}).get("name", u"Семён"), True))
     prompt_idx = [0]
+
+    clock_initial = cfg.get("game_clock")
+    clock_initial = clock_initial if isinstance(clock_initial, dict) else {}
+    clock_on = [clock_initial.get("enabled") is True]
+    clock_time_var = tk.StringVar(value=clock_initial.get("start_time", "08:00"))
+    clock_step_var = tk.StringVar(value=str(clock_initial.get("minutes_per_exchange", 5)))
+
+    def clock_config_path():
+        directory = (config_loader.user_data_dir() if hasattr(config_loader, "user_data_dir")
+                     else config_loader._DIR)
+        return os.path.join(directory, "config.json")
+
+    def clock_read_config():
+        path = clock_config_path()
+        if not os.path.exists(path):
+            return {}
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError(u"config.json должен содержать объект")
+        return data
+
+    def clock_values(reset=False, current=None):
+        try:
+            start = clock_time_var.get()
+            if (len(start) != 5 or start[2] != ":" or
+                    any(c not in "0123456789" for c in start[:2] + start[3:]) or
+                    not (0 <= int(start[:2]) <= 23 and 0 <= int(start[3:]) <= 59)):
+                raise ValueError(u"Время: введите ЧЧ:ММ (00:00-23:59)")
+            step = clock_step_var.get()
+            if not step or any(c not in "0123456789" for c in step) or not 0 <= int(step) <= 120:
+                raise ValueError(u"Минут за реплику: целое число от 0 до 120")
+            current = clock_read_config() if current is None else current
+            previous = current.get("game_clock")
+            previous = previous if isinstance(previous, dict) else {}
+            revision = previous.get("revision", 0)
+            if type(revision) is not int or revision < 0:
+                revision = 0
+            return dict(enabled=bool(clock_on[0]), start_time=start,
+                        minutes_per_exchange=int(step), revision=revision + int(reset))
+        except Exception as e:
+            set_status(str(e), False)
+            return None
+
+    def toggle_clock():
+        clock_on[0] = not clock_on[0]
+        clock_sw.set_on(clock_on[0])
+        layout()
+
+    def clock_step(delta):
+        value = clock_values()
+        if value is not None:
+            clock_step_var.set(str(min(120, max(0, value["minutes_per_exchange"] + delta))))
+
+    def apply_clock():
+        try:
+            current = clock_read_config()
+            clock = clock_values(reset=True, current=current)
+            if clock is None:
+                return False
+            current["game_clock"] = clock
+            with open(clock_config_path(), "w", encoding="utf-8") as f:
+                json.dump(current, f, ensure_ascii=False, indent=2)
+            cfg["game_clock"] = clock
+        except Exception as e:
+            set_status(tr(u"Не удалось установить время: %s") % tr(str(e)), False)
+            return False
+        try:
+            _post("/reload")
+            set_status(u"Время установлено, сервер перечитал конфиг", True)
+        except Exception:
+            set_status(u"Время сохранено (сервер не ответил)", False)
+        return True
+
+    clock_sw = CanvasSwitch(clock_on[0], toggle_clock)
+    clock_lbl = Txt(u"Игровые часы", F, CREAM)
+    clock_time_l = label(u"НАЧАЛО (ЧЧ:ММ)")
+    clock_time_f = field(clock_time_var)
+    clock_step_l = label(u"МИНУТ ЗА РЕПЛИКУ (0-120)")
+    clock_step_f = field(clock_step_var)
+    clock_minus = Chip(u"-", lambda: clock_step(-1))
+    clock_plus = Chip(u"+", lambda: clock_step(1))
+    clock_apply = Chip(u"Установить время", apply_clock, font=FB)
+
+    story_initial = cfg.get("story_events")
+    story_initial = story_initial if isinstance(story_initial, dict) else {}
+    story_on = [story_initial.get("enabled") is True]
+    story_intensity = [story_initial.get("intensity", "low")]
+    if story_intensity[0] not in ("low", "medium", "high"):
+        story_intensity[0] = "low"
+
+    def toggle_story():
+        story_on[0] = not story_on[0]
+        story_sw.set_on(story_on[0])
+        layout()
+
+    def select_story_intensity(value):
+        if value not in ("low", "medium", "high"):
+            value = "low"
+        story_intensity[0] = value
+        for key, chip in story_chips:
+            chip.set_selected(key == value)
+
+    story_sw = CanvasSwitch(story_on[0], toggle_story)
+    story_lbl = Txt(u"Сюжетные события", F, CREAM)
+    story_chips = [(key, Chip(text, lambda key=key: select_story_intensity(key)))
+                   for key, text in (("low", u"Редко"), ("medium", u"Умеренно"), ("high", u"Активно"))]
+    select_story_intensity(story_intensity[0])
+    story_note = Txt(u"Небольшие истории по контексту. Можно отказаться; без обязательных переходов.",
+                     FS, HINT, anchor="nw")
+    story_save_note = Txt(u"Применить: «Сохранить и применить» внизу окна.", FS, HINT, anchor="nw")
+
+    def lay_story(x0, x1, y):
+        story_sw.place(x0, y + 4)
+        story_lbl.place(x0 + story_sw.w + 12, y + 4 + story_sw.h / 2.0)
+        if not story_on[0]:
+            for obj in [chip for _, chip in story_chips] + [story_note, story_save_note]:
+                obj.hide()
+            return y + story_sw.h + 16
+        y = flow([chip for _, chip in story_chips], x0, y + story_sw.h + 16, x1 - x0) + 12
+        for note in (story_note, story_save_note):
+            note.place(x0, y, width=x1 - x0)
+            box = note.bbox()
+            y += (box[3] - box[1] if box else 32) + 8
+        return y + 8
+
+    def lay_clock(x0, x1, y):
+        clock_sw.place(x0, y + LBL + 4)
+        clock_lbl.place(x0 + clock_sw.w + 8, y + LBL + 4 + clock_sw.h / 2.0)
+        y += ROW
+        if not clock_on[0]:
+            for obj in (clock_time_l, clock_time_f, clock_step_l, clock_minus,
+                        clock_step_f, clock_plus, clock_apply):
+                obj.hide()
+            return y
+        clock_time_l.place(x0, y + 8)
+        clock_time_f.place(x0, y + LBL, 110, H)
+        sx = x0 + 140
+        clock_step_l.place(sx, y + 8)
+        clock_minus.place(sx, y + LBL)
+        clock_step_f.place(sx + clock_minus.nat_w + 6, y + LBL, 64, H)
+        clock_plus.place(sx + clock_minus.nat_w + 76, y + LBL)
+        y += ROW
+        clock_apply.place(x0, y)
+        return y + H + 16
 
     pr_sec = label(u"ПЕРСОНАЖИ", SECTION)
     pr_chips = []
@@ -2298,7 +2493,8 @@ def run_settings_window():
         for c in prompt_data.get("characters", []):
             if c.get("id") == tid:
                 col = c.get("color")
-        pr_chips.append(Chip(name, (lambda i=i: prompt_select(i)),
+        pr_chips.append(Chip(u"ГГ" if is_player else name,
+                             (lambda i=i: prompt_select(i)),
                              dot=col or ES_NAME_COLORS.get(tid, "#eaa842")))
     pn_l = label(u"ИМЯ ГЛАВНОГО ГЕРОЯ")
     pn_f = field(player_name_var)
@@ -2312,12 +2508,21 @@ def run_settings_window():
     pr_save = Chip(u"Сохранить промпт", lambda: prompt_save(), font=FB, padx=22)
     result_txt["prompt"] = Txt(u"", FS, HINT)
 
+    def mark_player_prompt_dirty(*_args):
+        """Make unsaved player-name edits visible on the prompt save control."""
+        if prompt_idx[0] < len(prompt_targets) and prompt_targets[prompt_idx[0]][2]:
+            pr_save.set_selected(True)
+
+    player_name_var.trace_add("write", mark_player_prompt_dirty)
+    persona_text.bind("<<Modified>>", lambda _event: (mark_player_prompt_dirty(),
+        persona_text.edit_modified(False)))
+
     def prompt_select(idx):
         prompt_idx[0] = idx
         for i, c in enumerate(pr_chips):
             c.set_selected(i == idx)
         tid, name, is_player = prompt_targets[idx]
-        persona_who.set(name)
+        persona_who.set(u"ГГ" if is_player else name)
         persona_text.delete("1.0", "end")
         if is_player:
             pd = prompt_data.get("player") or {}
@@ -2326,6 +2531,9 @@ def run_settings_window():
         else:
             persona_text.insert("1.0", prompt_data["characters"][idx].get("persona", ""))
         persona_text.edit_reset()
+        persona_text.edit_modified(False)
+        if "pr_save" in globals():
+            pr_save.set_selected(False)
         show_result("prompt", u"")
         layout()
 
@@ -2342,6 +2550,12 @@ def run_settings_window():
                         c["persona"] = persona_text.get("1.0", "end").strip()
             with open(chars_path, "w", encoding="utf-8") as f:
                 json.dump(prompt_data, f, ensure_ascii=False, indent=2)
+            if is_player:
+                prompt_targets[prompt_idx[0]] = (tid, prompt_data["player"]["name"], True)
+                pr_chips[prompt_idx[0]].retranslate()
+                persona_who.retranslate()
+            if "pr_save" in globals():
+                pr_save.set_selected(False)
             try:
                 _post("/reload")
                 show_result("prompt", u"✓ Сохранено, сервер перечитал персонажей")
@@ -2354,19 +2568,149 @@ def run_settings_window():
         cameo_on[0] = not cameo_on[0]
         cameo_sw.set_on(cameo_on[0])
         cfg["cameo_enabled"] = bool(cameo_on[0])
+        cfg["cameo_stay"] = bool(cameo_on[0])
+        try:
+            config_loader.save_config()
+        except Exception:
+            pass
+        layout()
+
+    cameo_sw = CanvasSwitch(cameo_on[0], toggle_cameo)
+    cameo_lbl = Txt(u"Появление других персонажей в локациях", F, CREAM)
+
+    # --- настройки «остающихся» камео (пишутся в config.json сразу) ---
+    cameo_freq_var = tk.DoubleVar(value=float(cfg.get("cameo_freq", 25)))
+    cameo_lines_var = tk.DoubleVar(value=float(cfg.get("cameo_stay_lines", 2)))
+    cameo_interject_var = tk.DoubleVar(value=float(cfg.get("cameo_interject", 35)))
+    cameo_ctx_var = tk.DoubleVar(value=float(cfg.get("cameo_ctx", 70)))
+
+    def _cameo_save(key, value):
+        cfg[key] = value
         try:
             config_loader.save_config()
         except Exception:
             pass
 
-    cameo_sw = CanvasSwitch(cameo_on[0], toggle_cameo)
-    cameo_lbl = Txt(u"Появления в локациях", F, CREAM)
+    def _cameo_freq(v):
+        cf_val.set(u"%d%%" % int(v))
+        _cameo_save("cameo_freq", int(v))
 
-    def lay_prompt(x0, x1, y, bottom):
+    def _cameo_lines(v):
+        cl_val.set(u"%d" % int(v))
+        _cameo_save("cameo_stay_lines", int(v))
+
+    def _cameo_interject(v):
+        ci_val.set(u"%d%%" % int(v))
+        _cameo_save("cameo_interject", int(v))
+
+    def _cameo_ctx(v):
+        cx_val.set(u"%d%%" % int(v))
+        _cameo_save("cameo_ctx", int(v))
+
+    cf_l = label(u"ЧАСТОТА ПОЯВЛЕНИЙ")
+    cf_val = Txt(u"%d%%" % int(cameo_freq_var.get()), FB, SECTION, anchor="e")
+    cf_sl = Slider(cameo_freq_var, 0, 100, 5, on_change=_cameo_freq)
+    cl_l = label(u"ФРАЗ ДО УХОДА")
+    cl_val = Txt(u"%d" % int(cameo_lines_var.get()), FB, SECTION, anchor="e")
+    cl_sl = Slider(cameo_lines_var, 1, 4, 1, on_change=_cameo_lines)
+    ci_l = label(u"ШАНС РЕПЛИКИ В РАЗГОВОРЕ")
+    ci_val = Txt(u"%d%%" % int(cameo_interject_var.get()), FB, SECTION, anchor="e")
+    ci_sl = Slider(cameo_interject_var, 0, 100, 5, on_change=_cameo_interject)
+    cx_l = label(u"РЕПЛИКИ В ТЕМУ (ПО КОНТЕКСТУ)")
+    cx_val = Txt(u"%d%%" % int(cameo_ctx_var.get()), FB, SECTION, anchor="e")
+    cx_sl = Slider(cameo_ctx_var, 0, 100, 5, on_change=_cameo_ctx)
+
+    immersion_scroll = [0, 0, 1]
+
+    class ImmersionScrollbar(tk.Canvas):
+        """Rounded parchment track and honey thumb, without native chrome."""
+        def __init__(self):
+            super().__init__(root, bg=PARCH_HEX, highlightthickness=0, bd=0)
+            self.command = None
+            self.first, self.last = 0, 1
+            self.height = 1
+            self.drag = None
+            self.create_line(8, 8, 8, 9, width=12, capstyle="round", fill="#4a3519", tags="edge")
+            self.create_line(8, 8, 8, 9, width=8, capstyle="round", fill=PARCH_HEX, tags="track")
+            self.create_line(8, 8, 8, 9, width=8, capstyle="round", fill="#eaa842", tags="thumb")
+            self.bind("<Configure>", self.redraw)
+            self.bind("<Button-1>", self.press)
+            self.bind("<B1-Motion>", self.motion)
+            self.bind("<ButtonRelease-1>", lambda e: setattr(self, "drag", None))
+
+        def config(self, command):
+            self.command = command
+
+        def set(self, first, last):
+            self.first, self.last = first, last
+            self.redraw()
+
+        def redraw(self, event=None):
+            if event is not None:
+                self.height = event.height
+            track = max(1, self.height - 16)
+            self.thumb_size = min(track, max(24, track * (self.last - self.first)))
+            self.travel = max(0, track - self.thumb_size)
+            fraction = self.first / max(1e-9, 1 - (self.last - self.first))
+            self.thumb_top = 8 + self.travel * min(1, max(0, fraction))
+            self.coords("edge", 8, 8, 8, 8 + track)
+            self.coords("track", 8, 8, 8, 8 + track)
+            self.coords("thumb", 8, self.thumb_top, 8, self.thumb_top + self.thumb_size)
+
+        def press(self, event):
+            if self.thumb_top - 4 <= event.y <= self.thumb_top + self.thumb_size + 4:
+                self.drag = event.y - self.thumb_top
+            elif self.command:
+                self.command("scroll", -1 if event.y < self.thumb_top else 1, "pages")
+
+        def motion(self, event):
+            if self.drag is not None and self.travel and self.command:
+                fraction = min(1, max(0, (event.y - self.drag - 8) / self.travel))
+                self.command("moveto", fraction * (1 - (self.last - self.first)))
+
+    immersion_bar = ImmersionScrollbar()
+
+    def scroll_immersion(action, value, units=None):
+        if action == "moveto":
+            offset = float(value) * (immersion_scroll[1] + immersion_scroll[2])
+        else:
+            offset = immersion_scroll[0] + int(value) * (40 if units == "units" else immersion_scroll[2])
+        immersion_scroll[0] = min(immersion_scroll[1], max(0, int(offset)))
+        layout()
+
+    immersion_bar.config(command=scroll_immersion)
+
+    def immersion_wheel(event):
+        if cur_tab[0] == 3 and event.widget in (canvas, immersion_bar):
+            if not event.delta:
+                return
+            scroll_immersion("scroll", -1 if event.delta > 0 else 1, "units")
+            return "break"
+
+    root.bind("<MouseWheel>", immersion_wheel, add=True)
+
+    def lay_prompt(x0, x1, y, bottom, _fixed=None):
+        fixed = {obj for obj in MANAGED if obj._pass == PASS[0]} if _fixed is None else _fixed
+        top = y
+        x1 -= 20
+        y -= immersion_scroll[0]
+        start = y
         cw = x1 - x0
+        y = lay_clock(x0, x1, y)
+        y = lay_story(x0, x1, y)
         cameo_sw.place(x0, y + 4)
         cameo_lbl.place(x0 + cameo_sw.w + 12, y + 4 + cameo_sw.h / 2.0)
         y += cameo_sw.h + 16
+        for title, value, slider in ((cf_l, cf_val, cf_sl), (cl_l, cl_val, cl_sl),
+                                     (ci_l, ci_val, ci_sl), (cx_l, cx_val, cx_sl)):
+            if cameo_on[0]:
+                title.place(x0, y + 8)
+                value.place(x1, y + 8)
+                slider.place(x0, y + LBL, cw)
+                y += ROW
+            else:
+                for obj in (title, value, slider):
+                    obj.hide()
         pr_sec.place(x0, y + 8)
         y = flow(pr_chips, x0, y + LBL + 2, cw) + 22
         if prompt_targets[prompt_idx[0]][2]:
@@ -2375,10 +2719,27 @@ def run_settings_window():
             y += ROW
         persona_l.place(x0, y + 8)
         persona_who.place(x1, y + 8)
-        by = bottom - H
-        persona_box.place(x0, y + LBL, cw, max(90, by - 16 - (y + LBL)))
+        by = max(bottom - H - immersion_scroll[0], y + LBL + 140 + 16)
+        persona_box.place(x0, y + LBL, cw, by - 16 - (y + LBL))
         pr_save.place(x1 - pr_save.nat_w, by)
         result_txt["prompt"].place(x0, by + H / 2.0, width=cw - pr_save.nat_w - 20)
+        content = by + H + 12 - start
+        viewport = bottom - top
+        immersion_scroll[1:] = [max(0, content - viewport), viewport]
+        if immersion_scroll[0] > immersion_scroll[1]:
+            immersion_scroll[0] = immersion_scroll[1]
+            return lay_prompt(x0, x1 + 20, top, bottom, fixed)
+        immersion_bar.place(in_=canvas, x=x1 + 4, y=top, width=16, height=viewport)
+        immersion_bar.set(immersion_scroll[0] / float(content),
+                          min(1, (immersion_scroll[0] + viewport) / float(content)))
+        # Clip whole controls at the viewport edges, including embedded Tk fields.
+        for obj in MANAGED:
+            if obj in fixed or obj._pass != PASS[0] or not obj.visible:
+                continue
+            target = getattr(obj, "tag", None) or getattr(obj, "id", None) or getattr(obj, "img_id", None)
+            box = canvas.bbox(target) if target is not None else None
+            if box and (box[1] < top or box[3] > bottom):
+                obj.hide()
 
 
     # ============================================== вкладка: История =======
@@ -2716,6 +3077,7 @@ def run_settings_window():
         b_deps.place(x1 - b_save.nat_w - 8 - b_deps.nat_w, by)
 
         # содержимое вкладки
+        immersion_bar.place_forget()
         LAYOUTS[cur_tab[0]](x0, x1, ty + 58, by - 18)
         for o in MANAGED:
             if o._pass != PASS[0] and o.visible:

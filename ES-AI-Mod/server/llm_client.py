@@ -17,7 +17,7 @@ class LlmError(Exception):
     pass
 
 
-def chat(messages, override_max_tokens=None, override_temperature=None):
+def chat(messages, override_max_tokens=None, override_temperature=None, override_timeout=None):
     lc = cfg.get("llm", {})
     url = lc.get("api_url", "https://api.openai.com/v1/chat/completions")
     model = lc.get("model", "gpt-4o-mini")
@@ -34,7 +34,8 @@ def chat(messages, override_max_tokens=None, override_temperature=None):
     }
     named = key_by_provider.get(provider, "")
     api_key = (keys.get(named, "") if named else "") or keys.get("custom_llm_api_key", "") or keys.get("llm_api_key", "") or keys.get("openai_api_key", "")
-    timeout = int(lc.get("request_timeout", 90))
+    timeout = (float(override_timeout) if override_timeout is not None
+               else int(lc.get("request_timeout", 90)))
 
     body = {
         "model": model,

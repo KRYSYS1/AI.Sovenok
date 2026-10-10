@@ -75,8 +75,10 @@ def clear(char_id):
         _persist(char_id)
 
 
-def _format_for_summary(messages, old_summary, player_name="Семён"):
-    lines = []
+def _format_for_summary(messages, old_summary, player_name="Игрок"):
+    lines = ["Игрок по имени %s: актуальное имя из настроек имеет приоритет над "
+             "именами игрока в старой истории и памяти. Не переименовывай игрока "
+             "по старым репликам; сохрани остальные события." % player_name]
     if old_summary:
         lines.append("Что уже было в памяти: " + old_summary)
     for m in messages:
@@ -115,7 +117,9 @@ def maybe_compress(char_id, cfg, llm_chat_fn, force=False):
             return False
         old_summary = conv.get("summary", "")
 
-    text = _format_for_summary(chunk, old_summary)
+    from characters_store import get_player
+    player_name = (get_player().get("name") or "").strip() or "Игрок"
+    text = _format_for_summary(chunk, old_summary, player_name)
     try:
         summary = llm_chat_fn(text).strip()
     except Exception:
