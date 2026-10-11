@@ -76,6 +76,7 @@ _ACTION_ASIDE_RE = re.compile(r"\[\s*action\s*:\s*aside\s*\]", re.IGNORECASE)
 _DRESS_SWIM = ("swim", "купальник", "купаться", "искупаться", "загорать", "плаваем")
 _DRESS_COVER = ("cover", "форма", "форму", "одеть", "оденься", "пионер", "pioneer", "normal", "прикры")
 _DRESS_SPORT = ("sport", "спорт")
+_DRESS_PARTY = ("dress", "party", "платье", "плать")
 
 
 def normalize_dress(value):
@@ -83,6 +84,8 @@ def normalize_dress(value):
     t = (value or "").strip().lower()
     if not t:
         return None
+    if t in _DRESS_PARTY:
+        return "dress"
     if any(w in t for w in _DRESS_SWIM):
         return "swim"
     if any(w in t for w in _DRESS_SPORT):
@@ -93,6 +96,15 @@ def normalize_dress(value):
 
 
 _LOCATION_ALIASES = [
+    ("old_building_inside", ("внутри старого корпуса", "внутрь старого корпуса", "старый корпус внутри", "в старом корпусе", "в старый корпус", "внутри старого здания", "old building interior", "inside the old building")),
+    ("library_ext", ("на улице у библиотеки", "улица библиотеки", "у библиотеки", "к библиотеке", "возле библиотеки", "перед библиотекой", "снаружи библиотеки", "library exterior", "outside the library")),
+    ("mine_descent", ("спуск в шахту", "спуску в шахту", "спуска в шахту", "спуске в шахту", "mine descent")),
+    ("mine_room", ("комната в шахте", "комнату в шахте", "комнате в шахте", "комнаты в шахте", "mine room")),
+    ("mine_exit", ("выход из шахты", "выходу из шахты", "выхода из шахты", "выходе из шахты", "mine exit")),
+    ("mine_crossroad", ("развилка шахты", "развилку шахты", "развилке шахты", "развилки шахты", "развилк в шахте", "mine crossroad", "mine junction")),
+    ("mine_coalface", ("забой шахты", "забою шахты", "забоя шахты", "забое шахты", "забой в шахте", "mine coalface")),
+    ("mine_halt", ("привал в шахте", "привалу в шахте", "привала в шахте", "привале в шахте", "mine halt", "mine rest stop")),
+    ("bus_410", ("автобус 410", "автобуса 410", "автобусу 410", "автобусе 410", "лиаз", "лиазе", "bus 410", "liaz")),
     # раздел 28 (продолжение): контекстные подлокации — специфичные фразы РАНЬШЕ общих.
     ("semen_room", ("комната семёна", "комнату семёна", "комнате семёна",
                     "в свою комнату", "к себе в комнату", "в мою комнату")),
@@ -122,9 +134,13 @@ _LOCATION_ALIASES = [
     ("sl_room", ("домик слави", "комната слави", "домик жени", "комната жени")),
     ("un_room", ("домик лены", "комната лены", "домик мику", "комната мику")),
     ("camp_gate", ("ворота лагеря", "к воротам", "вход в лагерь")),
-    ("old_building", ("старый корпус", "старое здание", "заброшенный корпус")),
+    ("bunker", ("бомбоубежище", "бомбоубежища", "бомбоубежищу", "бомбоубежищем",
+                "убежище", "убежища", "убежищу", "убежищем",
+                "бункер", "бункера", "бункеру", "бункере", "бункером",
+                "bunker", "bomb shelter")),
+    ("old_building", ("старый корпус", "старого корпуса", "старое здание", "заброшенный корпус", "old building")),
     ("catacombs", ("катакомб", "подземель")),
-    ("mine", ("в шахту", "заброшенная шахта", "в рудник")),
+    ("mine", ("в шахту", "в шахте", "заброшенная шахта", "в рудник", "mine corridor")),
     ("boathouse", ("лодочная станция", "к лодкам", "на причал")),
     ("washstand", ("умывальник", "умыться")),
     ("road", ("дорога к лагерю", "на дорогу", "по дороге")),
@@ -149,8 +165,12 @@ def detect_location_in_text(text):
     if not t:
         return None
     for loc_id, words in _LOCATION_ALIASES:
+        if t.strip() == loc_id:
+            return loc_id
+    for loc_id, words in _LOCATION_ALIASES:
         for w in words:
-            if w in t:
+            if w in t and (loc_id != "bunker" or re.search(
+                    r"(?<!\w)" + re.escape(w) + r"(?!\w)", t)):
                 return loc_id
     return None
 
@@ -163,8 +183,11 @@ def normalize_location(value):
     for loc_id, words in _LOCATION_ALIASES:
         if t == loc_id:
             return loc_id
+    for loc_id, words in _LOCATION_ALIASES:
         for word in words:
-            if word in t or t in word:
+            if ((loc_id == "bunker" and re.search(
+                    r"(?<!\w)" + re.escape(word) + r"(?!\w)", t)) or
+                    (loc_id != "bunker" and (word in t or t in word))):
                 return loc_id
     return None
 
@@ -199,9 +222,9 @@ def scene_encounter(scene, destination=None):
                                         ("destination_group_sizes", "group_size", 0)):
             values = scene.get(source)
             data[target] = values.get(destination, default) if isinstance(values, dict) else default
-        traveling = scene.get("traveling")
-        data["present"] = list(dict.fromkeys(cid for cid in traveling if isinstance(cid, str))) if (
-            scene.get("travel_all") is True and isinstance(traveling, list)) else []
+        traveling = scene.get("travel_with", scene.get("traveling"))
+        data["present"] = list(dict.fromkeys(cid for cid in traveling if isinstance(cid, str) and cid != scene.get("active"))) if (
+            (isinstance(scene.get("travel_with"), list) or scene.get("travel_all") is True) and isinstance(traveling, list)) else []
         data["replacement_available"] = False
     for key, default, low, high in (("capacity", 0, 0, 6), ("max_extra", 6, 1, 6),
                                      ("group_size", 0, 0, 5)):
@@ -215,7 +238,7 @@ def scene_encounter(scene, destination=None):
 
 
 def game_clock_settings(value):
-    defaults = dict(enabled=False, start_time="08:00", minutes_per_exchange=5, revision=0)
+    defaults = dict(enabled=False, show_time=True, start_time="08:00", minutes_per_exchange=5, revision=0)
     data = value if isinstance(value, dict) else {}
     for key, default in defaults.items():
         candidate = data.get(key, default)
@@ -225,7 +248,7 @@ def game_clock_settings(value):
 
 
 def game_clock_valid(key, value):
-    if key == "enabled":
+    if key in ("enabled", "show_time"):
         return type(value) is bool
     if key == "start_time":
         return isinstance(value, str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value) is not None
@@ -251,6 +274,7 @@ def clock_prompt(clock):
 
 
 def scene_prompt(scene, active):
+    import npc_activity
     """Current public scene overrides private conversation history."""
     if not isinstance(scene, dict):
         return "\n\nNo current scene roster supplied. Do not emit [action:cameo:...] tags."
@@ -298,9 +322,10 @@ def scene_prompt(scene, active):
         " With a valid goto to a different location, you may tag plausible destination NPCs"
         " even if absent from the current roster; do not describe them as already here."
          " Use destination_capacity and destination_group_sizes for that destination ID,"
-          " as EMPTY-location limits; subtract traveling extras ONLY when travel_all is true."
+          " as EMPTY-location limits; subtract exactly the selected travel_with extras."
           " Extra NPCs stay at the origin unless the CURRENT player message explicitly asks"
-          " everyone to move together. Never infer collective movement from history or your reply."
+          " named local companions or everyone to move together. The deterministic travel_with list"
+          " is authoritative; never infer companions from history or your reply."
           " Do not command background NPCs to follow or speak for them. Stepping aside for reading"
           " or other local business is NOT leaving the location; only that NPC's /cameo reply"
           " may signal its own aside. Never emit aside actions yourself."
@@ -311,8 +336,10 @@ def scene_prompt(scene, active):
         key: scene.get(key) if isinstance(scene.get(key), dict) else {}
         for key in ("destination_capacity", "destination_group_sizes", "destinations", "destination_nearby")}, ensure_ascii=False)
     prompt += "\nLocally present background NPCs: " + describe("nearby")
+    prompt += npc_activity.prompt(scene)
     prompt += "\nExplicit collective movement this turn: " + str(scene.get("travel_all") is True)
     prompt += "\nTraveling company: " + json.dumps(scene.get("traveling", []), ensure_ascii=False)
+    prompt += "\nSelected traveling extras this turn: " + json.dumps(scene.get("travel_with", []), ensure_ascii=False)
     context = scene.get("context")
     if isinstance(context, list):
         lines = ["%s: %s" % (item.get("who") or "...", item["what"].strip())
@@ -551,7 +578,8 @@ def resolve_cameo_intent(text, reply, scene, active, location, goto, recent, cha
                 "active": active, "roster_names": roster, "eligible_ids": sorted(allowed),
                  "present": pools["present"], "traveling": scene.get("traveling", []),
                   "available": pools["available"], "nearby": pools["nearby"],
-                "invitable": pools["invitable"],
+                 "invitable": pools["invitable"],
+                  "activity": scene.get("activity", {}), "pending_calls": scene.get("pending_calls", {}),
                  "group_size": scene["group_size"], "max_extra": scene["max_extra"],
                  "free_capacity": capacity, "recent_public_context": scene.get("context", []),
                  "location_id": destination if moving else origin, "destination_encounter": moving,
@@ -618,8 +646,28 @@ def health():
     }
 
 
-def chat(payload):
+def scene_flush(payload):
+    """Persist delivered speech and opaque story receipts, never generate context."""
+    import scene_memory
     import story_events
+    if not isinstance(payload, dict):
+        return dict(ok=False, error="invalid_payload")
+    events, acks = payload.get("public_events", []), payload.get("story_acks", [])
+    if (not isinstance(events, list) or len(events) > 40 or
+            not isinstance(acks, list) or len(acks) > 30 or
+            len(json.dumps(payload)) > 128 * 1024):
+        return dict(ok=False, error="delivery_too_large")
+    return dict(ok=True, public_event_ids=scene_memory.ingest(events),
+                story_acks=story_events.acknowledge_direct(acks))
+
+
+def chat(payload):
+    import npc_activity
+    import scene_memory
+    import selected_companions
+    scene_memory.ingest(payload.get("public_events"))
+    import story_events
+    story_events.acknowledge_direct(payload.get("story_acks"))
     chat_started = time.monotonic()
     import conversation
     import llm_client
@@ -627,56 +675,88 @@ def chat(payload):
 
     char_id = payload.get("character") or "un"
     text = (payload.get("text") or "").strip()
-    # Only the current player's explicit collective movement can take the extras along.
-    movement = r"\b(?:пошли(?:те)?|пойд[её]м(?:те)?|ид[её]м(?:те)?|отправимся|двинем(?:ся)?|перейд[её]м|go|let[’']s\s+go)\b"
-    collective = r"\b(?:все|вс[её]й\s+компанией|вс[её]й\s+группой|все\s+вместе|everyone|all\s+together)\b"
-    travel_all = any((re.search(movement, clause, re.IGNORECASE) or
-                     (re.search(r"^\s*давайте\b", clause, re.IGNORECASE) and detect_location_in_text(clause))) and
-                     re.search(collective, clause, re.IGNORECASE) and
-                     not re.search(r"\b(?:не|нет|не надо|не нужно|don't|not|сказал[аи]?|говорит|спросил[аи]?|раньше|вчера)\b|[\"«»]", clause, re.IGNORECASE)
-                     for clause in re.split(r"[.!?;\n]+", text))
     scene = payload.get("scene")
+    scene = npc_activity.authoritative(scene, payload.get("clock"), cfg.get("npc_activity_enabled", True) is True)
+    travel = selected_companions.resolve(text, scene, char_id, detect_location_in_text,
+                                         cfg.get("scene_auto_primary") is True)
+    old_primary = char_id
+    if travel["switch_primary"]:
+        char_id = travel["switch_primary"]
+    travel_all = travel["travel_all"]
     if isinstance(scene, dict):
-        scene = dict(scene, travel_all=travel_all)
+        scene = dict(scene, travel_all=travel_all, travel_with=travel["travel_with"])
+        if travel["switch_primary"]:
+            scene = dict(scene, active=char_id, context=[],
+                         present=[cid for cid in scene.get("present", []) if cid not in (char_id, old_primary)],
+                         nearby=[cid for cid in scene.get("nearby", []) if cid not in (char_id, old_primary)])
+            for key in ("available", "invitable"):
+                if isinstance(scene.get(key), list):
+                    scene[key] = [cid for cid in scene[key] if cid not in (char_id, old_primary)]
+            for key in ("destinations", "destination_nearby"):
+                if isinstance(scene.get(key), dict):
+                    scene[key] = {loc: [cid for cid in ids if cid not in (char_id, old_primary)]
+                                  for loc, ids in scene[key].items() if isinstance(ids, list)}
     novel_context = payload.get("novel_context") or []
     speaker = payload.get("speaker") or ""
     location = (payload.get("location") or "").strip()
     debug = scene_diagnostics(payload.get("scene"), char_id)
+    debug.update(runtime="live-bind-20261011", primary_before=old_primary,
+                 primary_after=char_id, auto_primary=cfg.get("scene_auto_primary") is True,
+                 movement_blocked=travel["movement_blocked"], player_goto=travel["goto"],
+                 switch_primary=travel["switch_primary"], travel_with=travel["travel_with"],
+                 travel_all=travel["travel_all"], cameo_aside=travel["cameo_aside"],
+                 runtime_chain="live-chain-20261011")
     if not text:
         scene_event("chat", "empty-input", debug=debug)
         return {"ok": False, "error": "Пустой запрос", "scene_debug": debug}
 
-    player_goto = detect_location_in_text(text) if re.search(
-        movement + r"|\b(?:отведи(?:те)?|давай(?:те)?\s+(?:все\s+)?(?:на|в|к))\b",
-        text, re.IGNORECASE) else None
-    if re.search(r"\b(?:иди(?:те)?\s+)?(?:почитай(?:те)?|займись|займитесь|отойди(?:те)?)\b", text, re.IGNORECASE) and not re.search(movement, text, re.IGNORECASE):
-        player_goto = None
+    player_goto = travel["goto"]
     addressed = resolve_direct_address(text, scene, char_id, location, player_goto, debug)
+    if travel["cameo_aside"]:
+        addressed = [cid for cid in (addressed or []) if cid not in travel["cameo_aside"]] or None
+    if travel["movement_blocked"] or travel["switch_primary"]:
+        addressed = None
     debug["direct_result"] = addressed
+    npc_calls = []
+    activity_address = bool(addressed)
+    if addressed and not debug.get("farewell_ids"):
+        addressed, npc_calls = npc_activity.decide(addressed, scene, normalize_location(player_goto))
     scene_event("chat", "received", debug=debug, **{k: v for k, v in debug.items()
                 if k not in ("build", "source", "pid", "origin", "status", "chosen_cameo")})
     farewell_ids = debug.get("farewell_ids", [])
-    if addressed or (farewell_ids and not debug.get("active_address")):
+    if not travel["switch_primary"] and (addressed or (activity_address and npc_calls) or (farewell_ids and not debug.get("active_address"))):
         addressed = addressed or []
         status = "selected" if addressed else "blocked"
         scene_event("address", status, addressed, debug,
                     address_id=debug["address_id"], address_reason=debug["address_reason"])
         out = {"ok": True, "reply": "", "suppress_main_reply": True,
+                "npc_calls": npc_calls,
                "cameo": addressed, "cameo_requested": True, "scene_debug": debug,
-               "travel_all": bool(travel_all)}
+               "travel_all": bool(travel_all), "travel_with": travel["travel_with"],
+               "cameo_aside": travel["cameo_aside"]}
         if debug.get("cameo_replace"):
             out["cameo_replace"] = True
         if farewell_ids:
             out["cameo_leave"] = [cid for cid in addressed if cid in farewell_ids]
         if player_goto and not farewell_ids:
             out["goto"] = normalize_location(player_goto)
+        debug.update(response_id=None, response_switch=None, response_goto=out.get("goto"),
+                     response_dress=None, suppress_main_reply=True)
+        direct_token = story_events.direct_request(text, addressed, char_id)
+        if direct_token:
+            out["story_token"] = direct_token
         scene_event("chat", "complete", addressed, resolution_origin="address",
                     resolution_status=status, suppress_main_reply=True)
         return out
     messages = conversation.build_history_block(char_id, cfg, novel_context, speaker,
                                                 location=location)
     messages[0] = dict(messages[0], content=messages[0]["content"] +
-                       scene_prompt(scene, char_id) + clock_prompt(payload.get("clock")))
+                       scene_prompt(scene, char_id) + clock_prompt(payload.get("clock")) + scene_memory.prompt(char_id))
+    messages[0]["content"] += "\nCurrent deterministic travel decision: " + json.dumps(travel, ensure_ascii=False)
+    if travel["movement_blocked"]:
+        messages[0]["content"] += "\nMovement cannot execute while the active character is told to stay. If the player also requests travel, explain briefly that selecting a different primary is required. Otherwise simply acknowledge staying here. Do not claim anyone moved."
+    if travel["switch_primary"]:
+        messages[0]["content"] += "\nYou are the newly selected conversation partner, not " + old_primary + ". That former partner stays at the origin. Answer as your own character; never speak or travel for the staying NPC."
     story_token = story_events.prepare(cfg.get("story_events"), char_id)
     if story_token:
         messages[0]["content"] += story_token["context"]
@@ -727,6 +807,10 @@ def chat(payload):
         goto = time_tag = dress_tag = None
         cameo_tags = []
     goto = player_goto if addressed is not None else (normalize_location(goto) if goto else player_goto)
+    if player_goto:
+        goto = player_goto
+    if travel["movement_blocked"]:
+        goto = None
     if addressed is not None:
         cameo_tags = addressed
         scene_event("address", "selected" if addressed else "blocked", addressed, debug,
@@ -734,10 +818,14 @@ def chat(payload):
     elif farewell_ids:
         # An absent farewell must not be turned into an arrival by model tags/classification.
         cameo_tags = []
-    elif not cameo_tags and debug.get("address_reason") != "active":
+    elif not cameo_tags and debug.get("address_reason") != "active" and not travel["movement_blocked"]:
         cameo_tags = resolve_cameo_intent(text, reply, scene, char_id,
                                          location, goto, messages[1:-1], chat_started, debug)
     emotion = map_emotion(char_id, emotion_raw)
+    cameo_tags = [cid for cid in cameo_tags if cid not in travel["cameo_aside"] and cid != char_id]
+    if travel["movement_blocked"]:
+        cameo_tags = []
+    cameo_tags, npc_calls = npc_activity.decide(cameo_tags, scene, goto)
 
     conversation.add_exchange(char_id, text, reply)
     if generated_reply:
@@ -747,8 +835,13 @@ def chat(payload):
 
     ch = get_character(char_id)
     out = {"ok": True, "reply": reply, "emotion": emotion, "name": ch["name"], "id": ch["id"],
-           "travel_all": bool(travel_all)}
-    if addressed is not None:
+            "npc_calls": npc_calls,
+           "travel_all": bool(travel_all), "travel_with": travel["travel_with"],
+            "cameo_aside": travel["cameo_aside"], "movement_blocked": travel["movement_blocked"]}
+    if travel["switch_primary"]:
+        out["switch_primary"] = travel["switch_primary"]
+        out["cameo_requested"] = True
+    if addressed is not None or npc_calls:
         out["cameo_requested"] = True
     if goto:
         out["goto"] = goto
@@ -758,6 +851,9 @@ def chat(payload):
         out["dress"] = dress_tag
     if cameo_tags:
         out["cameo"] = cameo_tags
+    debug.update(response_id=out["id"], response_switch=out.get("switch_primary"),
+                 response_goto=out.get("goto"), response_dress=out.get("dress"),
+                 suppress_main_reply=False)
     out["scene_debug"] = debug
     scene_event("chat", "complete", cameo_tags, resolution_origin=debug["origin"],
                 resolution_status=debug["status"])
@@ -765,7 +861,11 @@ def chat(payload):
 
 
 def initiative(payload):
+    import npc_activity
+    import scene_memory
+    scene_memory.ingest(payload.get("public_events"))
     import story_events
+    story_events.acknowledge_direct(payload.get("story_acks"))
     import conversation
     import llm_client
     from characters_store import get_character, map_emotion, player_block
@@ -795,8 +895,10 @@ def initiative(payload):
     if pb:
         sys_text += "\n\n" + pb
 
-    sys_text += scene_prompt(payload.get("scene"), char_id)
+    scene = npc_activity.authoritative(payload.get("scene"), payload.get("clock"), cfg.get("npc_activity_enabled", True) is True)
+    sys_text += scene_prompt(scene, char_id)
     sys_text += clock_prompt(payload.get("clock"))
+    sys_text += scene_memory.prompt(char_id)
     story_token = story_events.prepare(cfg.get("story_events"), char_id)
     if story_token:
         sys_text += story_token["context"]
@@ -817,12 +919,14 @@ def initiative(payload):
         emotion_raw, reply = "нормально", raw
     reply = _ACTION_ASIDE_RE.sub(" ", reply).strip().strip('"').strip()
     reply, goto, time_tag, dress_tag = parse_action_tags(reply)
-    reply, cameo_tags = parse_cameo_tags(reply, payload.get("scene"), char_id,
+    reply, cameo_tags = parse_cameo_tags(reply, scene, char_id,
                                        goto=goto, location=location)
     goto = normalize_location(goto)
+    cameo_tags, npc_calls = npc_activity.decide(cameo_tags, scene, goto)
     story_events.commit(story_token, story_update, reply, player_exchange=False)
     out = {"ok": True, "reply": reply, "emotion": map_emotion(char_id, emotion_raw),
-            "name": ch["name"], "id": ch["id"], "travel_all": False}
+            "npc_calls": npc_calls,
+            "name": ch["name"], "id": ch["id"], "travel_all": False, "travel_with": []}
     if goto:
         out["goto"] = goto
     if time_tag:
@@ -847,9 +951,12 @@ def cameo(payload):
     в сцене, кроме говорящего и активной героини.
     Используется только контекст текущей сцены, без личной памяти героини."""
     import story_events
+    story_events.acknowledge_direct(payload.get("story_acks"))
     import llm_client
     from characters_store import get_character, map_emotion, reply_rules, player_block
 
+    import scene_memory
+    scene_memory.ingest(payload.get("public_events"))
     cid = payload.get("character") or "mt"
     active = (payload.get("active") or "одной из девушек").strip()
     location = (payload.get("location") or "").strip()
@@ -866,6 +973,81 @@ def cameo(payload):
     ch = get_character(cid)
 
     parts = [ch["persona"], ch.get("speech", ""), reply_rules(ch)]
+    # Clothing authorization uses only this exchange, never public history/persona.
+    current_text = str(payload.get("player_text") or "").lower()
+    stems = {"sl": "слав", "mz": "жен", "un": "лен", "mi": "мику", "dv": "алис",
+             "us": "ульян", "mt": "ольг", "cs": "виол"}
+    clothing_request = None
+    for clause in re.split(r"[.!?;\n]", current_text):
+        if not re.search(r"(?:^|\W)(?:" + stems.get(cid, re.escape(cid)) + r"\w*|" + re.escape(cid) + r")(?:$|\W)", clause):
+            continue
+        # Negated alternatives and commands never authorize a garment.
+        for command in re.split(r",|\s+(?:а|и|but|and)\s+", clause):
+            if re.search(r"\b(?:не|not|don't|do not|где|когда|зачем|where|when|why)\b", command):
+                continue
+            match = re.search(r"\b(?:надень|надевай|оденься|приоденьс[яе]|переоденься|переоденешься|put on|change into)\s*(?:(?:\w+)\s+){0,3}?(купальник\w*|бикини|swimsuit|bikini|форм\w*|uniform|плать\w*|dress)\b", command)
+            if match:
+                clothing_request = "dress" if re.match(r"плать|dress", match.group(1)) else ("swim" if re.match(r"купальник|бикини|swimsuit|bikini", match.group(1)) else "cover")
+            elif re.search(r"\bпереоденься\s+для\s+(?:дискотек\w*|концерт\w*|бал|вечеринк\w*|праздник\w*)\b", command):
+                clothing_request = "dress"
+            elif re.search(r"\b(?:оденься|прикройся|cover up)\b|\b(?:сними|take off)\s*(?:купальник\w*|бикини|swimsuit|bikini)\b", command):
+                clothing_request = "cover"
+    loc_id = payload.get("location_id") or location
+    water = loc_id in ("beach", "island", "bathhouse")
+    homes = {"sl": "sl_room", "mz": "sl_room", "un": "un_room", "mi": "un_room",
+             "dv": "dv_room", "us": "dv_room", "mt": "mt_room", "cs": "aidpost_inside"}
+    clock = payload.get("clock")
+    phase = clock.get("phase") if isinstance(clock, dict) else None
+    clock_valid = isinstance(clock, dict) and game_clock_valid("start_time", clock.get("time"))
+    hour = int(clock["time"][:2]) if clock_valid else None
+    nonnight = (clock_valid and phase in ("morning", "day", "sunset") and
+                (clock.get("enabled") is not True or 6 <= hour < 22))
+    night_home = (payload.get("dress_reason") == "night_home" and homes.get(cid) == loc_id
+                  and payload.get("dress") == "swim" and (clock is None or
+                       (clock_valid and phase == "night" and
+                        (clock.get("enabled") is not True or hour >= 22 or hour < 6))))
+    # Actual structured age, never persona claims; unknown ages fail closed.
+    home_changing = (payload.get("dress_reason") == "home_changing" and cid in homes and cid not in ("us", "uv")
+                     and homes.get(cid) == loc_id and payload.get("dress") == "swim"
+                     and type(ch.get("age")) in (int, float) and ch["age"] >= 18
+                     and nonnight and not romantic)
+    actual_dress = payload.get("dress") or ("swim" if water else "pioneer")
+    event = r"\b(?:дискотек\w*|концерт\w*|бал|вечеринк\w*|праздник\w*)\b"
+    party_intent = (re.search(event, current_text) and re.search(r"\b(?:пошли|пойд[её]м|ид[её]м|готовимся|готовим|танцуем|начался|началась|ид[её]т)\b", current_text)
+                    and not re.search(r"\b(?:не|нет|где|когда|отмен\w*|законч\w*)\b", current_text))
+    party_allowed = cid in ("un", "sl", "us", "mt") and (payload.get("party") is True or party_intent or clothing_request == "dress")
+    if re.search(event, current_text) and re.search(r"\b(?:не|нет|отмен\w*|законч\w*)\b", current_text):
+        party_allowed = clothing_request == "dress" and cid in ("un", "sl", "us", "mt")
+    if clothing_request == "dress" and not party_allowed:
+        clothing_request = None
+    if actual_dress == "dress" and not (party_allowed or (cid in ("un", "sl", "us", "mt") and payload.get("dress_reason") == "player")):
+        actual_dress = "pioneer"
+    if actual_dress == "swim" and not (water or night_home or home_changing or payload.get("dress_reason") == "player"):
+        actual_dress = "pioneer"
+    if clothing_request:
+        actual_dress = "pioneer" if clothing_request == "cover" else clothing_request
+    parts.append("AUTHORITATIVE CURRENT CLOTHING: %s. %s "
+                 "This overrides persona clothing triggers, old dialogue, memory and other people's outfits. "
+                 "Do not claim a different outfit or change to swim inland without a CURRENT player request naming you. "
+                 "Current player clothing request: %s." % (
+                     actual_dress, "You are resting in the medical office during a night shift or after a shift; "
+                     "this is a workplace rest location, not your actual residence. "
+                     "The swim sprite is only an ordinary, non-sexual rest-clothing visual proxy, not romance or swimming. "
+                     "Allow privacy: politely ask them to knock or wait, or step aside. "
+                     "No body or sexual descriptions, no forced interaction, no assumed consent or romance. "
+                     "Keep the encounter strictly neutral; never describe changing clothes. "
+                     "Conversation may continue only after permission to enter; otherwise wait outside." if cid == "cs"
+                     and (night_home or home_changing) and actual_dress == "swim" else
+                     "Ordinary, non-sexual sleepwear, prepared for sleep at your own home; "
+                     "the swim sprite is only a sleepwear visual proxy, not romance or swimming." if night_home
+                     and actual_dress == "swim" else
+                      "You are wearing an ordinary swimsuit at your own home. "
+                     "non-sexual clothing. Allow privacy: politely ask them to knock or wait, or step aside. "
+                     "No body or sexual descriptions, no forced interaction, no assumed consent or romance. "
+                      "Keep the encounter strictly neutral; never describe changing clothes. "
+                      "Conversation may continue only after permission to enter; otherwise wait outside." if home_changing
+                     and actual_dress == "swim" else "Ordinary clothing appropriate to this location.",
+                     clothing_request or "none"))
     pb = player_block()
     if pb:
         parts.append(pb)
@@ -943,19 +1125,23 @@ def cameo(payload):
             "step aside: use it only when your reply actually commits to such local business. "
             "Never emit aside in leave mode; explicit departure takes precedence. "
             "The only other allowed action is your own clothing: append [action:dress:swim], "
-            "[action:dress:cover] or [action:dress:sport] only when explicitly changing it. "
+            "[action:dress:cover], [action:dress:sport] or [action:dress:dress] only when explicitly changing it. "
+            "Dress is ordinary, non-sexual party clothing for un/sl/us/mt only, never a body or nude tag. "
+            "It requires the current public party event or a current explicit clothing request naming you; stage alone is not a party. "
             "Swimming is ordinary, non-sexual water recreation; never infer swim clothing "
             "from romance or another character's clothing. Preserve all age and reply safety rules. "
             "Never emit goto, time or cameo actions.")
     parts.append(sit)
     parts.append(clock_prompt(payload.get("clock")))
-    story_token = story_events.prepare(cfg.get("story_events"), cid, readonly=True)
+    parts.append(scene_memory.prompt(cid))
+    direct_story = story_events.direct_context(payload, cid)
+    story_token = direct_story or story_events.prepare(cfg.get("story_events"), cid, readonly=True)
     if story_token:
         parts.append(story_token["context"])
 
     messages = [
         {"role": "system", "content": u"\n\n".join(parts)},
-        {"role": "user", "content": u"(Сцена продолжается. Твоя реплика.)"},
+        {"role": "user", "content": payload["player_text"] if direct_story else u"(Сцена продолжается. Твоя реплика.)"},
     ]
     try:
         raw = llm_client.chat(messages, override_max_tokens=100)
@@ -976,13 +1162,23 @@ def cameo(payload):
     reply, _g, _t, _d = parse_action_tags(reply)
     # Unlike free-form chat hints, cameo clothing must be an exact known signal.
     _d = normalize_dress(dress_values[-1]) if dress_values and dress_values[-1] in (
-        _DRESS_SWIM + _DRESS_COVER + _DRESS_SPORT) else None
+        _DRESS_SWIM + _DRESS_COVER + _DRESS_SPORT + _DRESS_PARTY) else None
+    if _d == "dress" and not party_allowed:
+        _d = None
+    if _d == "swim" and not (water or night_home or home_changing or clothing_request == "swim"):
+        _d = None
+    if clothing_request:
+        _d = clothing_request
     reply, _cameos = parse_cameo_tags(reply)
     reply = reply.strip().strip('"').strip()
     if not reply:
         return {"ok": False, "error": "empty"}
     out = {"ok": True, "reply": reply, "emotion": map_emotion(cid, emo_raw),
            "name": ch["name"], "id": cid}
+    if direct_story:
+        story_ack = story_events.direct_delivery(payload, cid, _story_update, reply)
+        if story_ack:
+            out["story_ack"] = story_ack
     if _d:
         out["dress"] = _d
     if aside:
@@ -1035,7 +1231,9 @@ def open_settings_ui():
 
 def history_clear(payload):
     import conversation
+    import scene_memory
     char_id = payload.get("character")
+    scene_memory.clear(char_id)
     if char_id:
         conversation.clear(char_id)
         return {"ok": True, "cleared": char_id}
@@ -1094,22 +1292,26 @@ def reload_config():
 
 _CFG_SECTIONS = {
     "story_events": {"enabled", "intensity"},
-    "game_clock": {"enabled", "start_time", "minutes_per_exchange", "revision"},
+    "game_clock": {"enabled", "show_time", "start_time", "minutes_per_exchange", "revision"},
     "llm": {"provider", "api_url", "model", "max_tokens", "temperature", "request_timeout"},
-    "tts": {"provider", "elevenlabs_default_voice", "openai_tts_model", "custom_tts_url", "cache_dir"},
+    "tts": {"provider", "character_overrides", "elevenlabs_default_voice", "openai_tts_model", "custom_tts_url", "cache_dir"},
     "stt": {"provider", "language", "max_record_seconds"},
 }
 
-_KEY_NAMES = ("llm_api_key", "groq_api_key", "mistral_api_key", "elevenlabs_api_key", "openai_api_key", "custom_tts_api_key", "custom_llm_api_key")
+_KEY_NAMES = ("llm_api_key", "groq_api_key", "mistral_api_key", "elevenlabs_api_key", "openai_api_key", "custom_tts_api_key", "custom_llm_api_key", "nvidia_api_key", "cohere_api_key", "cerebras_api_key", "github_api_key")
 
 _LLM_PRESETS = {
-    "groq": ("https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
-    "mistral": ("https://api.mistral.ai/v1/chat/completions", "mistral-small-latest"),
-    "openrouter": ("https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3.3-70b-instruct"),
-    "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
-    "ollama": ("http://localhost:11434/v1/chat/completions", "llama3.1:8b"),
-    "lmstudio": ("http://localhost:1234/v1/chat/completions", "local-model"),
-    "custom": ("http://127.0.0.1:8080/v1/chat/completions", "model-name"),
+    "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "mistral": ("https://api.mistral.ai/v1", "mistral-small-latest"),
+    "openrouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct"),
+    "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
+    "nvidia": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct"),
+    "cohere": ("https://api.cohere.ai/compatibility/v1", "command-a-03-2025"),
+    "cerebras": ("https://api.cerebras.ai/v1", "qwen-3.8-27b"),
+    "github": ("https://models.github.ai/inference", "openai/gpt-4o-mini"),
+    "ollama": ("http://localhost:11434/v1", "llama3.1:8b"),
+    "lmstudio": ("http://localhost:1234/v1", "local-model"),
+    "custom": ("http://127.0.0.1:8080/v1", "model-name"),
 }
 
 
@@ -1119,6 +1321,7 @@ def _mask_key(value):
 
 
 def get_config_state():
+    import llm_client
     import story_events
     import tts_client
     import stt_client
@@ -1129,6 +1332,8 @@ def get_config_state():
     return {
         "ok": True,
         "config": {
+            "scene_auto_primary": cfg.get("scene_auto_primary") is True,
+            "npc_activity_enabled": cfg.get("npc_activity_enabled", True) is True,
             "story_events": story_events.settings(cfg.get("story_events")),
             "game_clock": game_clock_settings(cfg.get("game_clock")),
             "llm": {
@@ -1140,6 +1345,7 @@ def get_config_state():
             },
             "tts": {
                 "provider": tc.get("provider", "auto"),
+                "character_overrides": tts_client.normalize_character_overrides(tc.get("character_overrides", {})),
                 "elevenlabs_default_voice": tc.get("elevenlabs_default_voice", ""),
                 "openai_tts_model": tc.get("openai_tts_model", ""),
                 "custom_tts_url": tc.get("custom_tts_url", ""),
@@ -1157,6 +1363,7 @@ def get_config_state():
             "cameo_max_extra": int(cfg.get("cameo_max_extra", 6)),
         },
         "keys": {name: _mask_key(keys.get(name, "")) for name in _KEY_NAMES},
+        "llm_available": llm_client.available_providers(),
         "tts_available": tts_client.available_providers(),
         "stt_available": stt_client.available_providers(),
         "presets": {k: {"api_url": v[0], "model": v[1]} for k, v in _LLM_PRESETS.items()},
@@ -1170,8 +1377,20 @@ def config_set(payload):
     section = payload.get("section", "")
     key = payload.get("key", "")
     value = payload.get("value")
+    if section == "" and key in ("scene_auto_primary", "npc_activity_enabled"):
+        if type(value) is not bool:
+            return {"ok": False, "error": "invalid " + key}
+        cfg[key] = value
+        config_loader.save_config()
+        return {"ok": True}
     if not isinstance(section, str) or not isinstance(key, str) or section not in _CFG_SECTIONS or key not in _CFG_SECTIONS[section]:
         return {"ok": False, "error": "недопустимый параметр %s.%s" % (section, key)}
+    if section == "tts" and key == "character_overrides":
+        import tts_client
+        try:
+            value = tts_client.normalize_character_overrides(value, strict=True)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
     if section == "story_events":
         if not story_events.valid_setting(key, value):
             return {"ok": False, "error": "invalid story_events.%s" % key}
@@ -1197,6 +1416,8 @@ def config_set(payload):
     elif key == "temperature":
         value = float(value)
     cfg[section][key] = value
+    if section == "llm":
+        config_loader.normalize_llm_urls(cfg)
     config_loader.save_config()
     return {"ok": True}
 
@@ -1340,13 +1561,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if self.path == "/scene/flush" and not 0 <= length <= 128 * 1024:
+                self._send({"ok": False, "error": "delivery_too_large"}, 413)
+                return
             raw = self.rfile.read(length) if length else b"{}"
             try:
                 payload = json.loads(raw.decode("utf-8", "replace"))
             except Exception:
                 payload = {}
 
-            if self.path.startswith("/state/loc"):
+            if self.path == "/scene/flush":
+                out = scene_flush(payload)
+            elif self.path.startswith("/state/loc"):
                 out = state_set_loc(payload)
             elif self.path.startswith("/chat"):
                 out = chat(payload)
@@ -1442,7 +1668,8 @@ def migrate_port():
 
 
 def main():
-    scene_event("startup", "loaded")
+    scene_event("startup", "loaded", runtime="live-chain-20261011",
+                auto_primary=cfg.get("scene_auto_primary") is True)
     migrate_port()
     # Запуск через pythonw (.pyw): stdout отсутствует — пишем в файл
     if sys.stdout is None:

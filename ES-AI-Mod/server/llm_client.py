@@ -8,6 +8,7 @@ LM Studio, любой custom).
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from config_loader import cfg, keys
@@ -17,10 +18,33 @@ class LlmError(Exception):
     pass
 
 
+def normalize_chat_url(url):
+    """Accept a base URL or a complete endpoint without moving its query."""
+    parts = urllib.parse.urlsplit((url or "").strip())
+    if not parts.scheme or not parts.netloc:
+        raise LlmError("LLM API URL must be an absolute HTTP(S) URL")
+    if parts.scheme not in ("http", "https") or parts.username or parts.password:
+        raise LlmError("LLM API URL must use HTTP(S) without embedded credentials")
+    path = parts.path.rstrip("/")
+    if not path.endswith("/chat/completions"):
+        path += "/chat/completions"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
+def available_providers():
+    return {provider: bool(keys.get(name, "").strip()) for provider, name in {
+        "groq": "groq_api_key", "mistral": "mistral_api_key", "openrouter": "llm_api_key",
+        "openai": "openai_api_key", "nvidia": "nvidia_api_key", "cohere": "cohere_api_key",
+        "cerebras": "cerebras_api_key", "github": "github_api_key", "custom": "custom_llm_api_key",
+    }.items()}
+
+
 def chat(messages, override_max_tokens=None, override_temperature=None, override_timeout=None):
     lc = cfg.get("llm", {})
-    url = lc.get("api_url", "https://api.openai.com/v1/chat/completions")
-    model = lc.get("model", "gpt-4o-mini")
+    url = normalize_chat_url(lc.get("api_url", "https://api.openai.com/v1"))
+    model = (lc.get("model") or "").strip()
+    if model in ("", "model-name"):
+        raise LlmError("No LLM model selected; choose a model in settings")
     provider = (lc.get("provider") or "").strip().lower()
     key_by_provider = {
         "groq": "groq_api_key",
@@ -29,10 +53,13 @@ def chat(messages, override_max_tokens=None, override_temperature=None, override
         "openai": "openai_api_key",
         "nvidia": "nvidia_api_key",
         "cohere": "cohere_api_key",
+        "cerebras": "cerebras_api_key",
         "github": "github_api_key",
         "custom": "custom_llm_api_key",
     }
     named = key_by_provider.get(provider, "")
+    if provider == "cerebras" and not keys.get(named, "").strip():
+        raise LlmError("No API key for Cerebras; obtain one at https://cloud.cerebras.ai")
     api_key = (keys.get(named, "") if named else "") or keys.get("custom_llm_api_key", "") or keys.get("llm_api_key", "") or keys.get("openai_api_key", "")
     timeout = (float(override_timeout) if override_timeout is not None
                else int(lc.get("request_timeout", 90)))

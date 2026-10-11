@@ -1,4 +1,5 @@
 """Offline regressions: execute server functions with fake dependencies, no config/API I/O."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import contextlib
 import io
@@ -15,12 +16,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 
-WORKSHOP = Path(r"D:\Program Files (x86)\Steam\steamapps\workshop\content\331470\3809240310\server\main.py")
+WORKSHOP = Path(WORKSHOP_ROOT) / "server/main.py"
 
 
 class DirectAddressTests(unittest.TestCase):
     def test_both_servers(self):
-        for path in (Path(__file__).with_name("main.py"), WORKSHOP):
+        for path in existing_paths((Path(__file__).with_name("main.py"), WORKSHOP)):
             with self.subTest(server=str(path)):
                 self.check_server(path)
 
@@ -52,12 +53,14 @@ class DirectAddressTests(unittest.TestCase):
         conversation.add_exchange = Mock()
         conversation.maybe_compress = lambda *args: None
         llm = types.ModuleType("llm_client")
+        llm.available_providers = lambda: {}
         llm.sanitize_in_character = lambda text: text
         llm.strip_prompt_leak = lambda text, prompt: text
         llm.quick_summarize = lambda *args: None
         env["threading"] = types.SimpleNamespace(Lock=threading.Lock,
             Thread=lambda **kwargs: types.SimpleNamespace(start=lambda: None))
-        with patch.dict(sys.modules, {"characters_store": store, "conversation": conversation, "llm_client": llm}):
+        with patch.dict(sys.modules, {"characters_store": store, "conversation": conversation, "llm_client": llm,
+                                     "scene_memory": types.SimpleNamespace(ingest=lambda events: None, prompt=lambda cid: "")}):
             exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
             events = []
             real_event = env["scene_event"]
@@ -175,6 +178,13 @@ class DirectAddressTests(unittest.TestCase):
                     self.assertEqual(out["goto"], destination)
                     self.assertIs(out["travel_all"], collective)
             llm.chat = lambda messages, **kwargs: '{"cameo":[]}' if kwargs else "Пойдём. [action:goto:beach]"
+            for text in ("Лена оставайся читать а мы со Славей пойдём погулять",
+                         "Лена оставайся читать а мы со Славей сходим куда-нибудь",
+                         "Лена оставайся читать"):
+                out = env["chat"]({"character": "un", "text": text, "scene": movement_scene})
+                self.assertTrue(out["movement_blocked"])
+                self.assertNotIn("goto", out)
+                self.assertEqual(out["travel_with"], [])
             out = env["chat"]({"character": "un", "text": "где пляж", "scene": movement_scene})
             self.assertEqual(out["goto"], "beach", "Model-generated goto remains unchanged")
             response = ["(нормально) Я подожду. [action:cameo:sl] [action:goto:library]"]
@@ -237,6 +247,7 @@ class DirectAddressTests(unittest.TestCase):
             self.assertNotIn("можешь остаться", prompt)
             provider = types.ModuleType("tts_client")
             provider.available_providers = lambda: {}
+            provider.normalize_character_overrides = lambda value: value or {}
             loader = types.ModuleType("config_loader")
             loader.keys = {}
             with patch.dict(sys.modules, {"tts_client": provider, "stt_client": provider, "config_loader": loader}):
@@ -459,7 +470,7 @@ class DirectAddressTests(unittest.TestCase):
         import random
         import textwrap
 
-        for root in (Path(__file__).parents[1] / "mod", WORKSHOP.parent.parent):
+        for root in existing_paths((Path(__file__).parents[1] / "mod", WORKSHOP.parent.parent)):
             with self.subTest(client=str(root)):
                 source = root.joinpath("es_ai_cameo.rpy").read_text(encoding="utf-8-sig")
                 # Only execute Python init blocks; no Ren'Py, settings or network access.
@@ -472,7 +483,8 @@ class DirectAddressTests(unittest.TestCase):
                          (isinstance(n, ast.FunctionDef) and n.name in names) or
                          (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and
                           t.id == "ES_AI_CAMEO_BY_LOC" for t in n.targets))]
-                roster = json.loads(WORKSHOP.with_name("es_characters.json").read_text(encoding="utf-8-sig"))["characters"]
+                server = Path(__file__).parent if root == Path(__file__).parents[1] / "mod" else root / "server"
+                roster = json.loads((server / "es_characters.json").read_text(encoding="utf-8-sig"))["characters"]
                 st = {"cameo_max_extra": 2, "cameo_stay": True, "cameo_stay_lines": 2,
                       "cameo_ctx": 70, "cameo_freq": 100}
                 shown = [{"id": "un"}]
@@ -483,7 +495,7 @@ class DirectAddressTests(unittest.TestCase):
                        "basestring": str, "long": int, "ES_AI_CHARS": [(c["id"], c["name"], "") for c in roster],
                        "ES_AI_SHOWN": shown, "ES_AI_LOC_CUR": ["beach"], "ES_AI_CAMEO_CD": [0],
                          "ES_AI_CAMEO_COOLDOWN": 5, "ES_AI_CAMEO_ACTIVE": [], "ES_AI_CAMEO_NEARBY": {},
-                        "ES_AI_LOC_OWNERS": {}, "ES_AI_CAMEO_PAIRS": [],
+                         "ES_AI_LOC_OWNERS": {}, "ES_AI_CAMEO_PAIRS": [], "ES_AI_CAMEO_PLAYER_TEXT": [""],
                        "ES_AI_CAMEO_P_COMPANION": 0, "ES_AI_ROMANCEABLE": [],
                        "es_ai_read_cameo_settings": lambda: st, "es_ai_cameo_on": lambda: enabled[0],
                        "es_ai_recent_snapshot": lambda n: [], "es_ai_recent_push": lambda *a: None,
@@ -594,7 +606,7 @@ class DirectAddressTests(unittest.TestCase):
     def test_chat_client_speech_guard(self):
         import textwrap
 
-        for root in (Path(__file__).parents[1] / "mod", WORKSHOP.parent.parent):
+        for root in existing_paths((Path(__file__).parents[1] / "mod", WORKSHOP.parent.parent)):
             source = root.joinpath("es_ai_chat.rpy").read_text(encoding="utf-8-sig")
             # Execute the actual action/speech/cameo statements from the Ren'Py label.
             block = source.split('    $ es_ai_apply_actions(_res, _inp)', 1)[1].split('    jump es_ai_chat_input', 1)[0]
@@ -606,12 +618,16 @@ class DirectAddressTests(unittest.TestCase):
                 with self.subTest(client=str(root), result=result):
                     calls = []
                     env = {"_res": result, "_inp": "player line", "es_ai_char_id": "un",
+                           "ES_AI_LOC_LAST_CHAR": ["sl"], "es_ai_char_name": lambda cid: cid,
                            "_clock_lines": 0, "es_ai_clock_complete": lambda *a: None,
+                           "es_ai_delivery_flush": lambda: None,
                            "es_ai_apply_actions": lambda *a: calls.append("actions"),
                            "es_ai_say_girl": lambda *a: calls.append("say"),
                            "es_ai_try_cameo": lambda *a: calls.append("cameo")}
                     exec(compile(code, str(root / "es_ai_chat.rpy"), "exec"), env)
                     self.assertEqual(calls, expected)
+                    self.assertEqual(env["es_ai_char_id"], "sl")
+                    self.assertEqual(env["es_ai_who_name"], "sl")
 
 
 if __name__ == "__main__":

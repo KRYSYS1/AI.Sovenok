@@ -1,4 +1,5 @@
 """Offline translation checks; never import settings or access user configs/APIs."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import itertools
 from pathlib import Path
@@ -8,8 +9,7 @@ import unittest
 from unittest.mock import Mock, mock_open
 
 
-SERVERS = (Path(__file__).resolve().parent,
-           Path(r"D:\Program Files (x86)\Steam\steamapps\workshop\content\331470\3809240310\server"))
+SERVERS = (Path(__file__).resolve().parent,) + existing_paths((Path(WORKSHOP_ROOT) / "server",))
 CYRILLIC = re.compile(r"[\u0400-\u04ff]")
 
 
@@ -54,6 +54,8 @@ class SettingsI18nTests(unittest.TestCase):
                     self.assertEqual(i18n["tr"](text, "ru"), text)
                     self.assertNotRegex(i18n["tr"](text, "en"), CYRILLIC)
             self.assertEqual(i18n["tr"]("\u041f\u043e\u0433\u0440\u0443\u0436\u0435\u043d\u0438\u0435", "en"), "Immersion")
+            self.assertEqual(i18n["tr"]("Показывать время", "en"), "Show time")
+            self.assertEqual(i18n["tr"]("Показывать время", "ru"), "Показывать время")
 
     def test_constructors_dynamic_values_and_language_switch(self):
         for server in SERVERS:
@@ -71,10 +73,9 @@ class SettingsI18nTests(unittest.TestCase):
             texts = [key for key in i18n["EN"] if key in {
                 "Погружение", "Появление других персонажей в локациях", "ГГ", "ЧАСТОТА ПОЯВЛЕНИЙ",
                 "ФРАЗ ДО УХОДА", "ШАНС РЕПЛИКИ В РАЗГОВОРЕ", "РЕПЛИКИ В ТЕМУ (ПО КОНТЕКСТУ)",
-                "Игровые часы", "НАЧАЛО (ЧЧ:ММ)", "МИНУТ ЗА РЕПЛИКУ (0-120)",
+                "Игровые часы", "Показывать время", "НАЧАЛО (ЧЧ:ММ)", "МИНУТ ЗА РЕПЛИКУ (0-120)",
                 "Сюжетные события", "Редко", "Умеренно", "Активно",
                 "Небольшие истории по контексту. Можно отказаться; без обязательных переходов.",
-                "Применить: «Сохранить и применить» внизу окна.",
                 "Установить время", "ИМЯ ГЛАВНОГО ГЕРОЯ", "ПЕРСОНАЖИ", "ХАРАКТЕР · PERSONA"}]
             for initial in ("ru", "en"):
                 for kind in ("Txt", "Chip"):
@@ -128,12 +129,12 @@ class SettingsI18nTests(unittest.TestCase):
                    DOT_IDLE="idle", layout_badge=Mock(), WIN_W=960)
         env["canvas"].winfo_width.return_value = 960
         extract([n for n in ast.walk(settings) if isinstance(n, ast.FunctionDef)
-                 and n.name in ("clock_values", "clock_step", "apply_clock", "set_status")], env)
+                 and n.name in ("clock_values", "clock_step", "save_all", "set_status")], env)
         env["clock_read_config"] = Mock(return_value={})
+        env["clock_show_time"] = [True]
         env["clock_time_var"].get.return_value = "08:00"
         env["clock_step_var"].get.return_value = "5"
         return env
-
     def test_clock_validation_and_steps_bilingual(self):
         for server in SERVERS:
             for lang in ("ru", "en"):
@@ -154,26 +155,33 @@ class SettingsI18nTests(unittest.TestCase):
                 env["open"].assert_not_called()
                 env["_post"].assert_not_called()
 
-    def test_apply_clock_statuses_bilingual(self):
+    def test_clock_literal_and_button_removed_bilingual(self):
+        #_LABEL «Установить время» убрано: виджета с такой надписью больше нет,
+        # остальные i18n-литералы часов продолжают переводиться.
         for server in SERVERS:
-            for lang in ("ru", "en"):
-                for case in ("success", "offline", "validation", "object", "read", "write"):
-                    with self.subTest(server=server, lang=lang, case=case):
-                        env = self.clock_environment(server, lang)
-                        if case == "offline":
-                            env["_post"].side_effect = OSError("offline")
-                        elif case == "validation":
-                            env["clock_time_var"].get.return_value = "bad"
-                        elif case in ("object", "read"):
-                            env["clock_read_config"].side_effect = ValueError(
-                                "config.json должен содержать объект" if case == "object" else "invalid JSON")
-                        elif case == "write":
-                            env["open"].side_effect = OSError("permission denied")
-                        self.assertEqual(env["apply_clock"](), case in ("success", "offline"))
-                        self.assertEqual(env["status"]["ok"], case == "success")
-                        self.assertEqual(bool(CYRILLIC.search(env["status"]["msg"])), lang == "ru")
-                        if case not in ("success", "offline"):
-                            env["_post"].assert_not_called()
+            settings, env, i18n = self.environment(server)
+            literals = set()
+            for call in ast.walk(settings):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
+                        call.func.id in ("Txt", "Chip"):
+                    for arg in call.args:
+                        for n in ast.walk(arg):
+                            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                                literals.add(n.value)
+            self.assertNotIn(u"Установить время", literals)
+            for text in ("Игровые часы", "НАЧАЛО (ЧЧ:ММ)", "МИНУТ ЗА РЕПЛИКУ (0-120)"):
+                self.assertIn(text, i18n["EN"])
+                self.assertNotRegex(i18n["tr"](text, "en"), CYRILLIC)
+
+    def test_clock_phase_strings_still_translated(self):
+        # Statuses of the removed apply_clock are gone; the remaining clock
+        # literals keep their translations. Guards against re-adding the button
+        # without i18n entries.
+        for server in SERVERS:
+            _, env, i18n = self.environment(server)
+            for text in (u"Время установлено, сервер перечитал конфиг",
+                         u"Не удалось установить время: %s"):
+                self.assertNotIn(text, i18n["EN"])
 
     def test_clock_config_object_error_is_translated(self):
         for server in SERVERS:

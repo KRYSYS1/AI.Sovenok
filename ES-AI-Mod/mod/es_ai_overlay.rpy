@@ -55,6 +55,8 @@ init 999 python:
 ################################################################################
 
 label es_ai_overlay_chat:
+    $ es_ai_delivery_flush()
+    $ es_ai_scene_begin(False)
     python:
         es_ai_chat_active[0] = True
         es_ai_internal_speaking[0] = True   # реплики мода не озвучиваются как "роман"
@@ -91,9 +93,12 @@ label es_ai_overlay_loop:
 
     $ persistent.es_ai_last_char = es_ai_overlay_char
     $ es_ai_say_girl(es_ai_overlay_char, _res.get("reply", ""), _res.get("emotion"))
+    $ es_ai_delivery_flush()
     jump es_ai_overlay_loop
 
 label es_ai_overlay_close:
+    $ es_ai_delivery_flush()
+    $ es_ai_scene_end()
     $ es_ai_tts_stop()
     hide screen es_ai_tts_player
     $ es_ai_internal_speaking[0] = False

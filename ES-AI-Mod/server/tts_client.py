@@ -51,8 +51,51 @@ def available_providers():
     return av
 
 
-def resolve_provider():
+_OVERRIDE_PROVIDERS = {"auto", "edge", "elevenlabs", "fish", "openai", "sapi", "custom", "off"}
+
+
+def normalize_character_overrides(value, strict=False):
+    """Normalize stored entries; API callers reject the whole map on invalid input."""
+    from characters_store import characters
+    known = {c["id"] for c in characters()}
+    if not isinstance(value, dict):
+        if strict:
+            raise ValueError("character_overrides must be an object")
+        return {}
+    result = {}
+    for cid, entry in value.items():
+        valid = (isinstance(cid, str) and cid in known and isinstance(entry, dict)
+                 and not (set(entry) - {"provider", "voice_id"}))
+        if valid:
+            provider = entry.get("provider", "auto")
+            voice = entry.get("voice_id", "")
+            valid = (isinstance(provider, str) and provider in _OVERRIDE_PROVIDERS
+                     and isinstance(voice, str) and len(voice.strip()) <= 1024)
+        if not valid:
+            if strict:
+                raise ValueError("invalid character_overrides entry: %s" % cid)
+            continue
+        result[cid] = {"provider": provider, "voice_id": voice.strip()}
+    return result
+
+
+def _character_override(character):
+    if not character:
+        return {}
+    if "_tts_preview_override" in character:
+        return character["_tts_preview_override"]
+    return normalize_character_overrides(cfg.get("tts", {}).get("character_overrides", {})).get(character.get("id"), {})
+
+
+def resolve_provider(character=None):
     pref = cfg.get("tts", {}).get("provider", "auto")
+    if pref == "off":
+        return None
+    override = _character_override(character).get("provider", "auto")
+    if override != "auto":
+        pref = override
+    if pref == "off":
+        return None
     av = available_providers()
     if pref != "auto":
         if av.get(pref):
@@ -124,6 +167,12 @@ def _pick_gender(ch, provider, narrator=False):
 
 
 def _voice_for(ch, provider):
+    entry = _character_override(ch)
+    selected = entry.get("provider", "auto")
+    if selected == "auto":
+        selected = resolve_provider()
+    if selected == provider and entry.get("voice_id"):
+        return entry["voice_id"]
     return _pick_gender(ch, provider, narrator=False)
 
 
@@ -131,9 +180,20 @@ def _narrator_voice(provider):
     return _pick_gender(None, provider, narrator=True)
 
 
-def synthesize(text, character=None, narrator=False):
+def synthesize(text, character=None, narrator=False, character_override=None):
     """Возвращает (path, provider) или (None, error_reason)."""
-    provider = resolve_provider()
+    if character_override is not None:
+        try:
+            if narrator or not isinstance(character, dict):
+                raise ValueError("preview requires a character")
+            entry = normalize_character_overrides(
+                {character.get("id"): character_override}, strict=True)[character["id"]]
+            if not entry["voice_id"]:
+                return None, "empty_voice_id"
+        except (ValueError, KeyError, TypeError):
+            return None, "invalid_character_override"
+        character = dict(character, _tts_preview_override=entry)
+    provider = resolve_provider(None if narrator else character)
     if not provider:
         return None, "tts_disabled"
     text = (text or "").strip()

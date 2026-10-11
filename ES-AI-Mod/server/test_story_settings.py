@@ -88,7 +88,7 @@ class StorySettingsTests(unittest.TestCase):
             # Execute actual story assignment and persistence/reload statements only.
             assignment = next(n for n in save.body if isinstance(n, ast.Assign)
                               and ast.unparse(n.targets[0]) == "cfg['story_events']")
-            persist = next(n for n in save.body if isinstance(n, ast.Expr)
+            persist = next(n for n in ast.walk(save) if isinstance(n, ast.Expr)
                            and ast.unparse(n.value) == "config_loader.save_config()")
             reload = next(n for n in save.body if isinstance(n, ast.Try)
                           and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
@@ -110,7 +110,10 @@ class StorySettingsTests(unittest.TestCase):
             branch = next(n for n in reset.body if isinstance(n, ast.If)
                           and isinstance(n.test, ast.Name) and n.test.id == "want_settings")
             story_branch = copy.deepcopy(branch)
-            story_branch.body = story_branch.body[:3]
+            story_branch.body = [n for n in story_branch.body if
+                                 (isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "story_on[0]") or
+                                 (isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and
+                                  ast.unparse(n.value.func) in ("story_sw.set_on", "select_story_intensity"))]
             for selected in (False, True):
                 env["want_settings"] = selected
                 extract([story_branch], env)
@@ -121,7 +124,7 @@ class StorySettingsTests(unittest.TestCase):
         for server in SERVERS:
             for lang in ("ru", "en"):
                 _, env = self.environment(server, lang=lang)
-                for name in ("story_lbl", "story_note", "story_save_note"):
+                for name in ("story_lbl", "story_note"):
                     text = env["tr"](env[name].src)
                     self.assertEqual(any("\u0400" <= c <= "\u04ff" for c in text), lang == "ru")
                 self.assertEqual([env["tr"](c.src) for _, c in env["story_chips"]],
@@ -132,8 +135,8 @@ class StorySettingsTests(unittest.TestCase):
                 for width in (744, 924, 1224):
                     end = env["lay_story"](28, 28 + width, 150)
                     self.assertEqual(env["story_note"].geo[2], width)
-                    self.assertGreater(env["story_save_note"].geo[1], env["story_note"].bbox()[3])
-                    self.assertGreater(end, env["story_save_note"].bbox()[3])
+                    self.assertGreater(env["story_note"].geo[1], 150 + env["story_sw"].h)
+                    self.assertGreater(end, env["story_note"].bbox()[3])
 
     def test_scroll_bounds_and_wheel_scope(self):
         for server in SERVERS:
@@ -151,7 +154,7 @@ class StorySettingsTests(unittest.TestCase):
             self.assertIsNone(env["immersion_wheel"](event))
 
     def test_full_immersion_layout_scrolls_without_prompt_overlap(self):
-        names = ("clock_sw clock_lbl clock_apply clock_time_l clock_time_f clock_step_l "
+        names = ("activity_sw activity_lbl auto_primary_sw auto_primary_lbl clock_sw clock_lbl clock_show_sw clock_show_lbl clock_time_l clock_time_f clock_step_l "
                   "clock_minus clock_step_f clock_plus cameo_sw cameo_lbl "
                   "cf_l cf_val cf_sl cl_l cl_val cl_sl ci_l ci_val ci_sl "
                  "cx_l cx_val cx_sl pr_sec pn_l pn_f persona_l persona_who persona_box pr_save").split()

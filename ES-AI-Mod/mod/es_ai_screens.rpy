@@ -23,7 +23,7 @@ screen es_ai_status_badge:
         hbox:
             spacing 8
             if es_ai_clock_text():
-                text "[es_ai_clock_text()]" size 18 color "#eeeeee" yalign 0.5
+                text es_ai_clock_text() size 18 color "#eeeeee" yalign 0.5
             if es_ai_server_state == "ready":
                 text "●" size 20 color "#7CFC00" yalign 0.5
                 text "AI: онлайн" size 18 color "#eeeeee" yalign 0.5

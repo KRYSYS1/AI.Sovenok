@@ -15,6 +15,7 @@ init 10 python:
         """Выбор героини из меню (используется действием экрана)."""
         global es_ai_char_id
         es_ai_char_id = cid
+        es_ai_girl_enter(cid, None)
 
 # Приветственные реплики (fallback, если сервер недоступен)
 init 10 python:
@@ -37,6 +38,8 @@ init 10 python:
 ################################################################################
 
 label es_ai:
+    $ es_ai_delivery_flush()
+    $ es_ai_scene_begin(True)
     $ es_ai_chat_active[0] = True
     $ es_ai_menu_hide()
     $ es_ai_clock_sync(redraw=False, force=True)
@@ -88,7 +91,7 @@ label es_ai_pick:
         "Лена":
             $ es_ai_pick_id("un")
         "Ульяна":
-            $ es_ai_char_id = "us"
+            $ es_ai_pick_id("us")
         "Мику":
             $ es_ai_pick_id("mi")
         "Женя":
@@ -199,6 +202,8 @@ label es_ai_chat_loop:
 
 label es_ai_chat_input:
     $ es_ai_clock_sync()
+    $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
+    $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
     $ _inp = renpy.input(u"Что скажешь %s? (пустой Enter — меню)" % es_ai_who_name,
                           default=es_ai_voice_text, length=200).strip()
     $ es_ai_voice_text = ""
@@ -216,10 +221,13 @@ label es_ai_chat_input:
 
     $ _clock_lines = ES_AI_CLOCK["lines"]
     $ es_ai_apply_actions(_res, _inp)
+    $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
+    $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
     if not _res.get("suppress_main_reply", False):
         $ es_ai_say_girl(es_ai_char_id, _res.get("reply", ""), _res.get("emotion"))
     $ es_ai_try_cameo(es_ai_char_id, _inp, _res)
     $ es_ai_clock_complete(_clock_lines, _res.get("_clock_revision"))
+    $ es_ai_delivery_flush()
     jump es_ai_chat_input
 
 ################################################################################
@@ -262,10 +270,13 @@ label es_ai_chat_initiative:
     else:
         $ _clock_lines = ES_AI_CLOCK["lines"]
         $ es_ai_apply_actions(_ini)
+        $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
+        $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
         if not _ini.get("suppress_main_reply", False):
             $ es_ai_say_girl(es_ai_char_id, _ini.get("reply", ""), _ini.get("emotion"))
         $ es_ai_try_cameo(es_ai_char_id, "", _ini)
         $ es_ai_clock_complete(_clock_lines, _ini.get("_clock_revision"))
+        $ es_ai_delivery_flush()
 
     jump es_ai_chat_input
 
@@ -305,6 +316,8 @@ label es_ai_loc_menu:
 ################################################################################
 
 label es_ai_leave_chat:
+    $ es_ai_delivery_flush()
+    $ es_ai_scene_end()
     $ es_ai_tts_stop()
     $ es_ai_menu_restore()
     $ es_ai_chat_active[0] = False
@@ -314,6 +327,8 @@ label es_ai_leave_chat:
     jump es_ai
 
 label es_ai_leave:
+    $ es_ai_delivery_flush()
+    $ es_ai_scene_end()
     $ es_ai_tts_stop()
     $ es_ai_menu_restore()
     $ es_ai_chat_active[0] = False

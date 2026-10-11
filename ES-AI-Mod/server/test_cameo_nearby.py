@@ -11,6 +11,7 @@ class NearbyTests(unittest.TestCase):
     def environment(self, root):
         env = clothing.ClothingTests().environment(root)
         load(os.path.join(root, "es_ai_locations.rpy"), env)
+        env["ES_AI_FREE_SCENE"][0] = True
         env["renpy"].scene = lambda: None
         env["renpy"].show = lambda *a: None
         env["renpy"].say = lambda *a: None
@@ -103,8 +104,9 @@ class NearbyTests(unittest.TestCase):
                 self.assertEqual({g["id"] for g in e["ES_AI_SHOWN"]}, {"sl", "us", "el"})
                 self.assertEqual(e["ES_AI_CAMEO_NEARBY"]["square"][0]["id"], "dv")
                 e["es_ai_girl_enter"]("us", "normal")
-                self.assertEqual(e["ES_AI_CAMEO_NEARBY"], {})
-                self.assertEqual(e["ES_AI_CAMEO_ACTIVE"], [])
+                self.assertEqual(e["ES_AI_CAMEO_NEARBY"]["square"][0]["id"], "dv")
+                self.assertEqual({g["id"] for g in e["ES_AI_SHOWN"]}, {"sl", "us", "el"})
+                self.assertEqual({g["id"] for g in e["ES_AI_CAMEO_ACTIVE"]}, {"sl", "el"})
 
     def test_apply_actions_only_explicit_boolean_moves_company(self):
         for root in ROOTS:

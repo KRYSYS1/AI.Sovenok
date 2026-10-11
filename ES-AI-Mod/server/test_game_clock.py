@@ -1,4 +1,5 @@
 """Offline clock regressions using the actual Python and label hooks in both clients."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import builtins
 import copy
@@ -6,6 +7,9 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
 import textwrap
 import types
 import unittest
@@ -15,6 +19,17 @@ from test_cameo_clothing import ROOTS, StoreDict, StoreList, load
 
 
 class GameClockTests(unittest.TestCase):
+    def test_clock_badge_uses_expression_not_text_interpolation(self):
+        for root in ROOTS:
+            with self.subTest(root=root):
+                with io.open(os.path.join(root, "es_ai_screens.rpy"), encoding="utf-8") as stream:
+                    source = stream.read()
+                self.assertNotIn("[es_ai_clock_text()]", source)
+                match = re.search(r'^\s*text (es_ai_clock_text\(\)) size 18', source, re.M)
+                self.assertIsNotNone(match)
+                for value in ("23:00", "08:05", ""):
+                    self.assertEqual(eval(match.group(1), {"es_ai_clock_text": lambda: value}), value)
+
     def settings_tree(self, root):
         path = (os.path.join(os.path.dirname(__file__), "settings_window.py")
                 if root == ROOTS[0] else os.path.join(root, "server", "settings_window.py"))
@@ -78,7 +93,7 @@ class GameClockTests(unittest.TestCase):
             nodes = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                      and n.name in ("clock_values", "clock_step")]
             time_var, step_var = Mock(), Mock()
-            env = dict(clock_time_var=time_var, clock_step_var=step_var, clock_on=[True],
+            env = dict(clock_time_var=time_var, clock_step_var=step_var, clock_on=[True], clock_show_time=[True],
                        clock_read_config=lambda: {"game_clock": {"revision": 3}}, set_status=Mock())
             exec(compile(ast.Module(body=nodes, type_ignores=[]), "settings-validation", "exec"), env)
             for time, step, valid in (("08:00", "5", True), ("23:59", "120", True),
@@ -99,6 +114,17 @@ class GameClockTests(unittest.TestCase):
                         step_var.set.assert_not_called()
 
     def environment(self, root):
+        # Each install must load its real source, not the previous install's
+        # mocked config stream from another subtest.
+        for mock_patch in getattr(self, "_clock_patches", []):
+            mock_patch.stop()
+        self._clock_patches = []
+
+        def start_patch(mock_patch):
+            mock_patch.start()
+            self._clock_patches.append(mock_patch)
+            self.addCleanup(mock_patch.stop)
+
         self.config = {"game_clock": dict(enabled=True, start_time="08:00",
                                            minutes_per_exchange=5, revision=0)}
         self.paths, self.draws, self.calls, self.requests = [], [], [], []
@@ -115,22 +141,204 @@ class GameClockTests(unittest.TestCase):
                    persistent=types.SimpleNamespace(es_ai_tts=False),
                    ES_AI_SERVER_DIR=root, es_ai_chat_active=[True],
                    es_ai_char_id="un", ES_AI_ROMANCEABLE=[],
-                   es_ai_internal_speaking=[False], es_ai_log=lambda *a: None)
+                    es_ai_internal_speaking=[False], es_ai_log=lambda *a: None)
+        env.update(es_ai_public_record=lambda *a: None, es_ai_public_snapshot=lambda: [])
+        from test_cameo_clothing import install_delivery_say
+        install_delivery_say(root, env)
+        load(os.path.join(root, "es_ai_cameo.rpy"), env,
+             {"es_ai_request_trace", "es_ai_party_context", "es_ai_cameo_clothing_request"})
+        env["ES_AI_CHARS"] = [("un", "un", "")]
+        load(os.path.join(root, "es_ai_api.rpy"), env,
+             {"es_ai_story_ack_record", "es_ai_story_ack_snapshot", "ES_AI_STORY_ACKS"})
         load(os.path.join(root, "es_ai_locations.rpy"), env)
+        env["ES_AI_FREE_SCENE"][0] = True
         env.update(es_ai_refresh_girls=lambda: self.calls.append("refresh"),
                    day_time=lambda: self.calls.append("day"),
                    sunset_time=lambda: self.calls.append("sunset"),
                    night_time=lambda: self.calls.append("night"))
-        if root == ROOTS[1]:
-            env["es_ai_user_config_path"] = lambda: "user/config.json"
+        # Exercise the independent resolver without consulting real user files.
+        start_patch(patch.dict(os.environ, {"LOCALAPPDATA": "stub-local-data"}))
+        user_config = os.path.join("stub-local-data", "AI.Sovenok", "config.json")
+        existing = os.path.exists
+        def clock_env_exists(path, *a, **k):
+            if path == user_config:
+                return root == WORKSHOP_ROOT
+            return existing(path, *a, **k)
+        start_patch(patch.object(os.path, "exists", clock_env_exists))
 
         def config_open(path, *args, **kwargs):
             self.paths.append(path)
             return io.StringIO(json.dumps(self.config))
 
-        self.addCleanup(patch.stopall)
-        patch("io.open", config_open).start()
+        start_patch(patch("io.open", config_open))
+        start_patch(patch.dict(sys.modules, {"__builtin__": builtins}))
         return env
+
+    def test_independent_clock_path_and_night_config(self):
+        for root in ROOTS:
+            with self.subTest(root=root):
+                env = self.environment(root)
+                self.assertNotIn("es_ai_user_config_path", env)
+                user_path = os.path.join("stub-local-data", "AI.Sovenok", "config.json")
+                with patch.object(os.path, "exists", lambda path: path == user_path):
+                    self.assertEqual(env["es_ai_clock_config_path"](), user_path)
+                    self.config["game_clock"].update(start_time="22:00", revision=8)
+                    env["es_ai_clock_sync"]()
+                    self.assertEqual(self.paths[-1], user_path)
+                    self.assertEqual(env["es_ai_clock_snapshot"](),
+                                     dict(enabled=True, time="22:00", phase="night"))
+                    self.assertIn("bg ext_square_night", self.draws)
+                with patch.object(os.path, "exists", return_value=False):
+                    self.assertEqual(env["es_ai_clock_config_path"](),
+                                     os.path.join(root, "config.json"))
+                with patch.dict(os.environ, {"LOCALAPPDATA": ""}):
+                    self.assertEqual(env["es_ai_clock_config_path"](),
+                                     os.path.join(root, "config.json"))
+
+    def test_clock_without_cameo_alias_and_with_bom(self):
+        for root in ROOTS:
+            env = self.environment(root)
+            del env["_es_ai_cameo_builtins"]
+            env.update(min="15", max="59")
+            self.config["game_clock"].update(start_time="23:00", revision=9)
+            text = "\ufeff" + json.dumps(self.config)
+            with patch("io.open", side_effect=lambda *a, **k: io.StringIO(text)):
+                env["es_ai_clock_sync"]()
+            self.assertEqual(env["es_ai_clock_snapshot"](),
+                             dict(enabled=True, time="23:00", phase="night"))
+            self.assertIn("bg ext_square_night", self.draws)
+
+    def test_bundled_python2_clock_codec_regression(self):
+        executable = os.path.join(GAME_ROOT, "lib", "windows-x86_64", "python.exe")
+        if not os.path.exists(executable):
+            self.skipTest("Game's bundled Python 2 is not installed")
+        names = {"es_ai_clock_config_path", "es_ai_clock_settings", "es_ai_clock_phase",
+                 "es_ai_clock_sync", "es_ai_clock_snapshot", "es_ai_clock_begin",
+                  "es_ai_clock_complete", "es_ai_clock_text"}
+        with tempfile.TemporaryDirectory(prefix="esai-clock-") as directory:
+            user_dir = os.path.join(directory, "AI.Sovenok")
+            os.mkdir(user_dir)
+            path = os.path.join(user_dir, "config.json")
+            for bom in (False, True):
+                with io.open(path, "w", encoding="utf-8") as stream:
+                    stream.write(("\ufeff" if bom else "") + json.dumps({"game_clock": dict(
+                        enabled=True, start_time="23:00", minutes_per_exchange=5, revision=9)}))
+                for root in ROOTS:
+                    with self.subTest(root=root, bom=bom):
+                        with io.open(os.path.join(root, "es_ai_locations.rpy"), encoding="utf-8") as stream:
+                            source = stream.read()
+                        functions = []
+                        for block in re.split(r"^init [^\n]*python:\s*\n", source, flags=re.M)[1:]:
+                            block = textwrap.dedent(block)
+                            for node in ast.parse(block).body:
+                                if isinstance(node, ast.FunctionDef) and node.name in names:
+                                    functions.append(ast.get_source_segment(block, node))
+                        script = "# -*- coding: utf-8 -*-\n" + "\n\n".join(functions) + '''
+import codecs
+assert __import__('sys').version_info[:2] == (2, 7)
+try:
+    codecs.lookup('utf-8-sig')
+except LookupError:
+    pass
+else:
+    raise AssertionError('Expected the bundled runtime without utf-8-sig')
+class StoreDict(dict):
+    pass
+dict = StoreDict
+min, max = '15', '59'
+ES_AI_SERVER_DIR = 'unused-fallback'
+ES_AI_CLOCK = dict(minutes=None, revision=None, enabled=False, lines=0, generation=0)
+ES_AI_TIME = ['day']
+def es_ai_apply_time_phase(phase, *args):
+    ES_AI_TIME[0] = phase
+assert '_es_ai_cameo_builtins' not in globals()
+settings = es_ai_clock_sync()
+assert settings == dict(enabled=True, show_time=True, start_time='23:00', minutes_per_exchange=5, revision=9), settings
+assert es_ai_clock_snapshot() == dict(enabled=True, time='23:00', phase='night')
+token = es_ai_clock_begin()
+ES_AI_CLOCK['lines'] += 1
+es_ai_clock_complete(0, token)
+assert es_ai_clock_snapshot() == dict(enabled=True, time='23:05', phase='night')
+ES_AI_CLOCK['show_time'] = False
+assert es_ai_clock_text() == ''
+print('Python 2 clock: 23:00 night -> 23:05 night')
+'''
+                        result = subprocess.run([executable, "-"], input=script.encode("utf-8"),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=dict(os.environ, LOCALAPPDATA=directory), timeout=20)
+                        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+                        self.assertIn(b"23:05 night", result.stdout)
+
+    def test_night_snapshot_reaches_server_prompt(self):
+        for root in ROOTS:
+            env = self.environment(root)
+            self.config["game_clock"].update(start_time="23:00", revision=9)
+            env["es_ai_clock_sync"]()
+            server_path = (os.path.join(os.path.dirname(__file__), "main.py")
+                           if root == ROOTS[0] else os.path.join(root, "server", "main.py"))
+            server = dict(re=re)
+            # Read the real server before the client's config-open mock applies.
+            with patch("io.open", builtins.open):
+                load(server_path, server, {"clock_prompt", "game_clock_valid"}, rpy=False)
+            prompt = server["clock_prompt"](env["es_ai_clock_snapshot"]())
+            self.assertIn("AUTHORITATIVE CURRENT GAME CLOCK", prompt)
+            self.assertIn("Time: 23:00. Phase: night.", prompt)
+            self.assertEqual(server["clock_prompt"](dict(enabled=False)), "")
+
+    def test_display_only_toggle_preserves_progression_and_phase(self):
+        for root in ROOTS:
+            server_path = (os.path.join(os.path.dirname(__file__), "main.py")
+                           if root == ROOTS[0] else os.path.join(root, "server", "main.py"))
+            server = dict(re=re)
+            with patch("io.open", builtins.open):
+                load(server_path, server, {"clock_prompt", "game_clock_valid"}, rpy=False)
+            env = self.environment(root)
+            self.config["game_clock"].update(start_time="21:58", revision=7)
+            token = env["es_ai_clock_begin"]()
+            self.assertEqual(env["es_ai_clock_text"](), "21:58")
+            self.config["game_clock"]["show_time"] = False
+            env["es_ai_clock_sync"]()
+            self.assertEqual(env["es_ai_clock_text"](), "")
+            self.assertEqual(env["es_ai_clock_begin"](), token)
+            env["ES_AI_CLOCK"]["lines"] += 1
+            env["es_ai_clock_complete"](0, token)
+            snapshot = env["es_ai_clock_snapshot"]()
+            self.assertEqual(snapshot, dict(enabled=True, time="22:03", phase="night"))
+            self.assertIn("Time: 22:03. Phase: night.", server["clock_prompt"](snapshot))
+            self.assertIn("bg ext_square_night", self.draws)
+            self.assertEqual(env["ES_AI_CLOCK"]["revision"], 7)
+            self.config["game_clock"]["show_time"] = True
+            env["es_ai_clock_sync"]()
+            self.assertEqual(env["es_ai_clock_text"](), "22:03")
+            for invalid in (None, 0, 1, "false", [], {}):
+                self.config["game_clock"]["show_time"] = invalid
+                self.assertIs(env["es_ai_clock_settings"]()["show_time"], True)
+
+    def test_server_display_flag_strict_validation_and_persistence(self):
+        for root in ROOTS:
+            path = (os.path.join(os.path.dirname(__file__), "main.py")
+                    if root == ROOTS[0] else os.path.join(root, "server", "main.py"))
+            env = dict(re=re, cfg={"game_clock": {"enabled": True, "revision": 7}},
+                       config_loader=types.SimpleNamespace(save_config=Mock()))
+            with patch("io.open", builtins.open):
+                load(path, env, {"game_clock_valid", "game_clock_settings", "config_set"}, rpy=False)
+                with io.open(path, encoding="utf-8-sig") as stream:
+                    tree = ast.parse(stream.read())
+            whitelist = next(n for n in tree.body if isinstance(n, ast.Assign)
+                             and any(isinstance(t, ast.Name) and t.id == "_CFG_SECTIONS" for t in n.targets))
+            exec(compile(ast.Module(body=[whitelist], type_ignores=[]), path, "exec"), env)
+            self.assertIs(env["game_clock_settings"](None)["show_time"], True)
+            for value in (False, True):
+                result = env["config_set"](dict(section="game_clock", key="show_time", value=value))
+                self.assertTrue(result["ok"])
+                self.assertIs(env["cfg"]["game_clock"]["show_time"], value)
+                self.assertEqual(env["cfg"]["game_clock"]["revision"], 7)
+            env["config_loader"].save_config.assert_has_calls([unittest.mock.call(), unittest.mock.call()])
+            for invalid in (None, 0, 1, "false", [], {}):
+                result = env["config_set"](dict(section="game_clock", key="show_time", value=invalid))
+                self.assertFalse(result["ok"])
+                self.assertIs(env["game_clock_settings"]({"show_time": invalid})["show_time"], True)
+            self.assertEqual(env["config_loader"].save_config.call_count, 2)
 
     def test_config_revision_pause_and_rollover(self):
         for root in ROOTS:
@@ -140,8 +348,8 @@ class GameClockTests(unittest.TestCase):
                 sync(redraw=False)
                 self.assertIs(type(e["ES_AI_CLOCK"]), StoreDict)
                 self.assertEqual(snapshot(), dict(enabled=True, time="08:00", phase="morning"))
-                self.assertEqual(self.paths[-1], "user/config.json" if root == ROOTS[1]
-                                 else os.path.join(root, "config.json"))
+                self.assertEqual(self.paths[-1], os.path.join("stub-local-data", "AI.Sovenok", "config.json") if root == WORKSHOP_ROOT
+                                  else os.path.join(root, "config.json"))
                 self.assertEqual(e["persistent"].sprite_time, "day")
                 self.assertFalse(self.draws)
                 token = e["es_ai_clock_begin"]()
@@ -182,7 +390,7 @@ class GameClockTests(unittest.TestCase):
                              minutes_per_exchange="bad", revision=True)}):
                 self.config = invalid
                 self.assertEqual(e["es_ai_clock_settings"](),
-                    dict(enabled=False, start_time="08:00", minutes_per_exchange=5, revision=0))
+                    dict(enabled=False, show_time=True, start_time="08:00", minutes_per_exchange=5, revision=0))
             self.config = {"game_clock": dict(minutes_per_exchange=900, revision=-5, start_time="6:05")}
             self.assertEqual(e["es_ai_clock_settings"]()["minutes_per_exchange"], 120)
             self.assertEqual(e["es_ai_clock_settings"]()["revision"], 0)
@@ -229,8 +437,10 @@ class GameClockTests(unittest.TestCase):
                 self.assertEqual(e["es_ai_loc_bg"](loc), loc["time_bgs"]["sunset"][0])
             for loc_id, assets, expected in (
                     ("camp_gate", ("ext_camp_entrance_day", "ext_camp_entrance_night"), "ext_camp_entrance_night"),
-                    ("library", ("int_library_day", "ext_library_night"), "ext_library_night"),
-                    ("library", ("int_library_day", "int_library_night", "ext_library_sunset"), "ext_library_sunset"),
+                    ("library", ("int_library_day", "ext_library_night"), "int_library_day"),
+                    ("library", ("int_library_day", "int_library_night", "ext_library_sunset"), "int_library_night"),
+                    ("library_ext", ("ext_library_day", "ext_library_night", "int_library_night"), "ext_library_night"),
+                    ("library_ext", ("ext_library_day", "int_library_night"), "ext_library_day"),
                     ("boathouse", ("ext_boathouse_day", "ext_boathouse_night"), "ext_boathouse_night"),
                     ("aidpost", ("ext_aidpost_day", "ext_aidpost_night"), "ext_aidpost_night"),
                     ("club_room", ("int_clubs_male_day", "int_clubs_male2_night"), "int_clubs_male2_night"),
@@ -282,6 +492,7 @@ class GameClockTests(unittest.TestCase):
                 if callable(fn):
                     e[name] = types.FunctionType(fn.__code__, e, name, fn.__defaults__)
             e.update(es_ai_location_context=lambda: "square", es_ai_scene_snapshot=lambda cid: {},
+                     ES_AI_CAMEO_PLAYER_TEXT=[""],
                      es_ai_cameo_name=lambda cid: cid, es_ai_recent_snapshot=lambda n: [],
                      es_ai_girl_enter=lambda *a: None, es_ai_sanitize_text=lambda s: s,
                      es_ai_speakers={"un": lambda s: None, "dv": lambda s: None})
@@ -371,6 +582,8 @@ class GameClockTests(unittest.TestCase):
                     result = dict(reply=main, suppress_main_reply=suppress,
                                   _clock_revision=e["es_ai_clock_begin"]())
                     e.update(_res=result, _ini=result, _inp="hi", es_ai_char_id="un",
+                             es_ai_delivery_flush=lambda: None,
+                             es_ai_char_name=lambda cid: cid,
                              es_ai_apply_actions=lambda *a: None)
 
                     def say(*args):

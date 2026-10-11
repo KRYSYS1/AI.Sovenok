@@ -1,4 +1,5 @@
 """Offline story state and actual endpoint tests; never import live main/config."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import importlib.util
 import json
@@ -15,8 +16,8 @@ from unittest.mock import Mock, patch
 from test_cameo_clothing import load
 
 DEV = os.path.dirname(__file__)
-WORKSHOP = r"D:\Program Files (x86)\Steam\steamapps\workshop\content\331470\3809240310\server"
-TEMP = r"C:\Users\kolan\AppData\Local\Temp\kilo"
+WORKSHOP = os.path.join(WORKSHOP_ROOT, "server")
+TEMP = TEST_TEMP
 OPTIONS = dict(enabled=True, intensity="low")
 
 
@@ -50,7 +51,7 @@ class StoryTests(unittest.TestCase):
         self.fail("No deterministic eligible offer")
 
     def test_disabled_lazy_defaults_and_paths(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             manager = self.manager(mod)
             with patch.object(mod, "default_path", side_effect=AssertionError("must not load")):
@@ -70,7 +71,7 @@ class StoryTests(unittest.TestCase):
                 self.assertEqual(mod.default_path(), os.path.join(root, "memory", "story_events.json"))
 
     def test_tags_balanced_bounded_and_independent(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             tag = '[story:' + json.dumps(dict(status="offered", title='Brackets ] and escaped " quote',
                                              summary="Nested {data}", participants=["un"])) + ']'
@@ -88,7 +89,7 @@ class StoryTests(unittest.TestCase):
             self.assertIsNone(mod.parse_tags(tag + tag)[1])
 
     def test_lifecycle_reload_cooldown_and_sanitization(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             with self.subTest(root=root):
                 mod = module(root)
                 manager = self.manager(mod)
@@ -182,7 +183,7 @@ class StoryTests(unittest.TestCase):
         self.assertEqual(manager.state, reloaded.state)
 
     def test_actual_chat_acceptance_refusal_and_pending_disable(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             mod.manager = self.manager(mod)
             mod.manager.path += str(len(root))
@@ -192,8 +193,8 @@ class StoryTests(unittest.TestCase):
                 llm.chat.return_value = 'Hi [story:{"status":"active","summary":"Player agreed"}]'
                 self.assertTrue(env["chat"](dict(text="Yes, I will help"))["ok"])
                 self.assertEqual(mod.manager.state["status"], "active")
-                llm.chat.return_value = 'No pressure [story:{"status":"declined","notes":"Player refused"}]'
-                self.assertTrue(env["chat"](dict(text="No, I do not want this"))["ok"])
+                llm.chat.return_value = 'No pressure [story:{"status":"active","notes":"Wrong"}]'
+                self.assertTrue(env["chat"](dict(text="Stop this story"))["ok"])
                 self.assertEqual(mod.manager.state["status"], "declined")
                 self.assertEqual(mod.manager.state["summary"], "Player agreed")
                 before = dict(mod.manager.state)
@@ -205,7 +206,7 @@ class StoryTests(unittest.TestCase):
                 self.assertEqual(before, mod.manager.state)
 
     def test_actual_endpoints_success_failure_fallback_and_readonly(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             for enabled in (False, True):
                 with self.subTest(root=root, enabled=enabled):
                     mod = module(root)
@@ -248,9 +249,10 @@ class StoryTests(unittest.TestCase):
     def test_copies_identical_and_config_whitelist(self):
         with open(os.path.join(DEV, "story_events.py"), "rb") as stream:
             expected = stream.read()
-        with open(os.path.join(WORKSHOP, "story_events.py"), "rb") as stream:
-            self.assertEqual(expected, stream.read())
-        for root in (DEV, WORKSHOP):
+        if os.path.isfile(os.path.join(WORKSHOP, "story_events.py")):
+            with open(os.path.join(WORKSHOP, "story_events.py"), "rb") as stream:
+                self.assertEqual(expected, stream.read())
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             env, _, _, modules = self.endpoint_env(root, mod, False)
             with open(os.path.join(root, "main.py"), encoding="utf-8-sig") as stream:
@@ -267,7 +269,7 @@ class StoryTests(unittest.TestCase):
                 self.assertEqual(env["cfg"]["story_events"], dict(enabled=True, intensity="high"))
 
     def test_decision_detector_clear_refusals(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             for text in ("\u043d\u0435 \u0445\u043e\u0447\u0443 \u0443\u0447\u0430\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c", "\u043d\u0435 \u0445\u043e\u0447\u0443 \u044d\u0442\u0438\u043c \u0437\u0430\u043d\u0438\u043c\u0430\u0442\u044c\u0441\u044f", "\u043d\u0435 \u0438\u043d\u0442\u0435\u0440\u0435\u0441\u043d\u043e",
                          "\u041d\u0435\u0442, \u043d\u0435 \u0445\u043e\u0447\u0443!", "\u0434\u0430\u0432\u0430\u0439 \u0431\u0435\u0437 \u044d\u0442\u043e\u0433\u043e", "not interested", "No thanks.",
@@ -276,7 +278,7 @@ class StoryTests(unittest.TestCase):
                     self.assertEqual(mod.player_decision(text), "declined")
 
     def test_decision_detector_explicit_acceptance_and_unknown(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             for text in ("\u0434\u0430", "\u0434\u0430\u0432\u0430\u0439", "\u0441\u043e\u0433\u043b\u0430\u0441\u0435\u043d", "\u0445\u043e\u0440\u043e\u0448\u043e, \u0434\u0430\u0432\u0430\u0439", "YES!", "let's do it",
                          "\u044f \u043f\u043e\u043c\u043e\u0433\u0443", "\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u043a\u0443", "Yes, I will help", "I'll help"):
@@ -289,7 +291,7 @@ class StoryTests(unittest.TestCase):
                     self.assertEqual(mod.player_decision(text), "unknown")
 
     def test_offered_refusal_without_tag_preserves_summary_and_starts_pause(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             manager = self.manager(mod)
             manager.path += str(len(root))
@@ -305,7 +307,7 @@ class StoryTests(unittest.TestCase):
             self.assertFalse(self.token(manager)["eligible"])
 
     def test_offered_refusal_overrides_erroneous_active_tag(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             manager = self.manager(mod)
             manager.path += str(len(root))
@@ -317,7 +319,7 @@ class StoryTests(unittest.TestCase):
             self.assertEqual(manager.state["title"], "Camp task")
 
     def test_offered_unknown_cannot_activate_but_explicit_acceptance_can(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             manager = self.manager(mod)
             manager.path += str(len(root))
@@ -340,7 +342,7 @@ class StoryTests(unittest.TestCase):
             self.assertEqual(manager.state["status"], "active")  # Offered-only detector must not derail active plots.
 
     def test_decisions_respect_empty_reply_stale_version_and_initiative(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             mod = module(root)
             manager = self.manager(mod)
             manager.path += str(len(root))
@@ -359,14 +361,14 @@ class StoryTests(unittest.TestCase):
             self.assertEqual(manager.state["turns"], turns + 1)
 
     def test_both_chat_integrations_enforce_offered_player_decisions(self):
-        for root in (DEV, WORKSHOP):
+        for root in existing_paths((DEV, WORKSHOP)):
             for text, model_reply, expected in (
                     ("No thanks", "No pressure", "declined"),
                     ("\u043d\u0435 \u0445\u043e\u0447\u0443 \u0443\u0447\u0430\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c", 'Hi [story:{"status":"active","summary":"Wrong"}]', "declined"),
                     ("Tell me more", 'Hi [story:{"status":"active","summary":"Wrong"}]', "offered"),
                     ("\u043d\u0435 \u0445\u043e\u0447\u0443 \u0438\u0434\u0442\u0438 \u0442\u0443\u0434\u0430 \u0434\u0430\u0432\u0430\u0439 \u0437\u0434\u0435\u0441\u044c", 'Hi [story:{"status":"active"}]', "offered"),
                     ("\u0434\u0430", 'Hi [story:{"status":"active"}]', "active"),
-                    ("\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u043a\u0443", 'Hi [story:{"status":"active"}]', "active")):
+                     ("\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u043a\u0443", 'Hi [story:{"status":"active"}]', "offered")):
                 with self.subTest(root=root, text=text):
                     mod = module(root)
                     with tempfile.TemporaryDirectory(dir=self.temp.name) as directory:
@@ -394,6 +396,93 @@ class StoryTests(unittest.TestCase):
                         self.assertEqual(mod.manager.state["summary"], "Find a notebook")
                         conversation.add_exchange.assert_called_once_with("un", text, out["reply"])
 
+    def test_contextual_actions_aliases_and_model_signal(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            state = dict(status="offered", title="Help Elektronik", summary="Search for a note", participants=["el"])
+            for text in ("\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u043a\u0443", "\u0434\u0430\u0432\u0430\u0439 \u043f\u043e\u043c\u043e\u0436\u0435\u043c \u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u0438\u043a\u0443",
+                         "let's find a note", "let's help Elektronik", "I will search for a note"):
+                self.assertEqual(mod.player_decision(text, state, True), "accepted", text)
+            for text in ("\u044f \u0437\u0430\u0439\u043c\u0443\u0441\u044c \u043f\u043e\u0438\u0441\u043a\u043e\u043c", "\u0433\u043e\u0442\u043e\u0432 \u043f\u043e\u043c\u043e\u0447\u044c", "I'm ready to help"):
+                self.assertEqual(mod.player_decision(text, state, True), "accepted", text)
+                self.assertEqual(mod.player_decision(text, state, False), "unknown", text)
+            for text in ("Tell me more", "let's find a notebook", "let's find a note?", "let's not find a note",
+                         "She said let's find a note", "let's find a note but not now", "\u043d\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u043a\u0430 \u043d\u0435 \u0442\u0430\u043c"):
+                self.assertEqual(mod.player_decision(text, state, True), "unknown", text)
+
+    def test_contextual_chat_accepts_only_matching_offer(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            with tempfile.TemporaryDirectory(dir=self.temp.name) as directory:
+                mod.manager = mod.StoryManager(os.path.join(directory, "story.json"))
+                self.offer(mod.manager)
+                mod.manager.commit(self.token(mod.manager), dict(status="offered", title="Help Elektronik",
+                                   summary="Search for a note"), "Reply")
+                env, llm, _, modules = self.endpoint_env(root, mod, True)
+                with patch.dict(sys.modules, modules):
+                    for text in ("let's find a notebook", "let's find a note?", "I don't want to go there"):
+                        llm.chat.return_value = 'Reply [story:{"status":"active","summary":"Wrong"}]'
+                        self.assertTrue(env["chat"](dict(text=text))["ok"])
+                        self.assertEqual(mod.manager.state["status"], "offered")
+                    llm.chat.return_value = 'Reply [story:{"status":"active"}]'
+                    self.assertTrue(env["chat"](dict(text="\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u043a\u0443"))["ok"])
+                    self.assertEqual(mod.manager.state["status"], "active")
+                    llm.chat.return_value = "No pressure"
+                    self.assertTrue(env["chat"](dict(text="\u0434\u0430\u0432\u0430\u0439 \u043f\u0440\u0435\u043a\u0440\u0430\u0442\u0438\u043c \u043f\u043e\u0438\u0441\u043a\u0438"))["ok"])
+                    self.assertEqual(mod.manager.state["status"], "declined")
+                    self.assertEqual(mod.manager.state["summary"], "Search for a note")
+                    self.assertEqual(llm.chat.call_count, 5)
+
+    def test_active_abandonment_wrong_tags_reload_pause_and_character_switch(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            for text in ("\u043d\u0435 \u0445\u043e\u0447\u0443 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0442\u044c \u044d\u0442\u0443 \u0438\u0441\u0442\u043e\u0440\u0438\u044e", "\u0434\u0430\u0432\u0430\u0439 \u043f\u0440\u0435\u043a\u0440\u0430\u0442\u0438\u043c \u043f\u043e\u0438\u0441\u043a\u0438",
+                         "\u043e\u0441\u0442\u0430\u0432\u0438\u043c \u044d\u0442\u0443 \u0437\u0430\u0442\u0435\u044e", "stop this story", "let's stop the search"):
+                for update in (None, dict(status="completed", summary="Wrong")):
+                    with tempfile.TemporaryDirectory(dir=self.temp.name) as directory:
+                        manager = mod.StoryManager(os.path.join(directory, "story.json"))
+                        self.offer(manager)
+                        manager.commit(self.token(manager), dict(status="active"), "Reply", player_text="Yes")
+                        reloaded = mod.StoryManager(manager.path)
+                        token = reloaded.prepare(OPTIONS, ["un", "sl", "mt"], "sl")
+                        self.assertEqual(reloaded.state, manager.state)
+                        self.assertIn('"status": "active"', token["context"])
+                        before = dict(reloaded.state)
+                        self.assertIsNone(reloaded.prepare(dict(enabled=False), ["sl"], "sl"))
+                        self.assertEqual(before, reloaded.state)
+                        reloaded.commit(token, update, "No pressure", player_text=text)
+                        self.assertEqual(reloaded.state["status"], "declined", text)
+                        self.assertEqual(reloaded.state["summary"], "Find a notebook")
+                        self.assertEqual(reloaded.state["closed_turn"], reloaded.state["turns"])
+                        resumed = mod.StoryManager(manager.path)
+                        for _ in range(10):
+                            token = self.token(resumed)
+                            self.assertFalse(token["eligible"])
+                            self.assertEqual(token["eligible"], self.token(resumed)["eligible"])
+                            resumed.commit(token, dict(status="offered", title="Wrong", summary="Wrong"), "Reply")
+                            self.assertEqual(resumed.state["status"], "declined")
+
+    def test_active_ordinary_answers_and_location_objections_cannot_decline(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            with tempfile.TemporaryDirectory(dir=self.temp.name) as directory:
+                manager = mod.StoryManager(os.path.join(directory, "story.json"))
+                self.offer(manager)
+                manager.commit(self.token(manager), dict(status="active"), "Reply", player_text="Yes")
+                for text in ("\u0434\u0430", "No thanks", "No, the notebook is not there", "I don't want to go there, let's stay here"):
+                    manager.commit(self.token(manager), dict(status="declined", summary="Wrong"), "Reply", player_text=text)
+                    self.assertEqual(manager.state["status"], "active")
+                    self.assertEqual(manager.state["summary"], "Find a notebook")
+                stale = self.token(manager)
+                manager.commit(self.token(manager), dict(status="active", summary="Latest"), "Reply", player_text="Yes")
+                before = dict(manager.state)
+                self.assertFalse(manager.commit(self.token(manager), None, "", player_text="stop this story"))
+                with patch.object(mod.os, "replace", side_effect=OSError("offline disk failure")):
+                    self.assertFalse(manager.commit(self.token(manager), None, "Reply", player_text="stop this story"))
+                self.assertEqual(before, manager.state)
+                manager.commit(stale, None, "Reply", player_text="stop this story")
+                self.assertEqual(manager.state["status"], "active")
+                self.assertEqual(manager.state["summary"], "Latest")
 
 if __name__ == "__main__":
     unittest.main()

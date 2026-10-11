@@ -14,7 +14,7 @@ Widget = story_tests.Widget
 class ImmersionLayoutTests(unittest.TestCase):
     def environment(self, server):
         tree, env = story_tests.StorySettingsTests().environment(server)
-        names = ("clock_sw clock_lbl clock_apply clock_time_l clock_time_f clock_step_l "
+        names = ("activity_sw activity_lbl auto_primary_sw auto_primary_lbl clock_sw clock_lbl clock_show_sw clock_show_lbl clock_time_l clock_time_f clock_step_l "
                  "clock_minus clock_step_f clock_plus cameo_sw cameo_lbl cf_l cf_val cf_sl "
                  "cl_l cl_val cl_sl ci_l ci_val ci_sl cx_l cx_val cx_sl pr_sec pn_l pn_f "
                  "persona_l persona_who persona_box pr_save").split()
@@ -40,7 +40,14 @@ class ImmersionLayoutTests(unittest.TestCase):
                     self.assertLessEqual(env["immersion_scroll"][0], env["immersion_scroll"][1])
                     self.assertGreaterEqual(env["persona_box"].geo[3], 140)
                     self.assertLessEqual(env["pr_save"].geo[1] + 34, bottom)
-                    self.assertEqual(env["clock_apply"].geo is not None, clock)
+                    for name in ("clock_time_l", "clock_time_f", "clock_step_l", "clock_step_f",
+                                 "clock_minus", "clock_plus", "clock_show_sw", "clock_show_lbl"):
+                        self.assertEqual(env[name].geo is not None, clock, name)
+                    if clock:
+                        self.assertGreater(env["clock_show_sw"].geo[0], env["clock_sw"].geo[0])
+                        self.assertGreater(env["clock_time_f"].geo[1], env["clock_show_sw"].bbox()[3])
+                        self.assertGreater(env["clock_step_f"].geo[0],
+                                           env["clock_time_f"].geo[0] + env["clock_time_f"].geo[2])
                     self.assertEqual(env["story_note"].geo is not None, story)
                     self.assertEqual(env["cf_sl"].geo is not None, cameo)
                     self.assertIsNotNone(env["clock_sw"].geo)

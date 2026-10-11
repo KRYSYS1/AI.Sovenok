@@ -27,23 +27,21 @@ EN = {
     u"ШАНС РЕПЛИКИ В РАЗГОВОРЕ": u"INTERJECTION CHANCE",
     u"РЕПЛИКИ В ТЕМУ (ПО КОНТЕКСТУ)": u"CONTEXTUAL LINES",
     u"Игровые часы": u"Game clock",
+    u"Занятость персонажей": u"Character activities",
+    u"Показывать время": u"Show time",
+    u"Автоматически менять собеседника": u"Automatically switch conversation partner",
     u"Сюжетные события": u"Story Events",
     u"Редко": u"Occasional",
     u"Умеренно": u"Moderate",
     u"Активно": u"Frequent",
     u"Небольшие истории по контексту. Можно отказаться; без обязательных переходов.":
         u"Optional short stories based on context. You can decline; no forced transitions.",
-    u"Применить: «Сохранить и применить» внизу окна.":
-        u"Apply with 'Save and apply' at the bottom of the window.",
     u"НАЧАЛО (ЧЧ:ММ)": u"START (HH:MM)",
     u"МИНУТ ЗА РЕПЛИКУ (0-120)": u"MINUTES PER EXCHANGE (0-120)",
-    u"Установить время": u"Set time",
+    # «Установить время» и её статусы убраны: кнопка была дубликатом «Сохранить».
     u"config.json должен содержать объект": u"config.json must contain an object",
     u"Время: введите ЧЧ:ММ (00:00-23:59)": u"Time: enter HH:MM (00:00-23:59)",
     u"Минут за реплику: целое число от 0 до 120": u"Minutes per exchange: an integer from 0 to 120",
-    u"Не удалось установить время: %s": u"Could not set time: %s",
-    u"Время установлено, сервер перечитал конфиг": u"Time set, the server reloaded the config",
-    u"Время сохранено (сервер не ответил)": u"Time saved (the server did not answer)",
     u"История": u"History",
     u"Карта": u"Map",
     u"Авто": u"Auto",
@@ -62,6 +60,18 @@ EN = {
     u"ТЕМПЕРАТУРА · ФАНТАЗИЯ": u"TEMPERATURE · CREATIVITY",
     u"Проверить связь": u"Test connection",
     u"ПРОВАЙДЕР ОЗВУЧКИ": u"VOICE PROVIDER",
+    u"ИНДИВИДУАЛЬНЫЕ ГОЛОСА": u"INDIVIDUAL VOICES",
+    u"ПЕРСОНАЖ": u"CHARACTER",
+    u"Общий провайдер": u"Global provider",
+    u"Добавить персонажа": u"Add character",
+    u"Прослушать голос": u"Preview voice",
+    u"✗ Укажите Voice ID.": u"✗ Enter a Voice ID.",
+    u"✗ Озвучка выключена.": u"✗ Voice synthesis is disabled.",
+    u"Привет! Это проверка голоса персонажа.": u"Hello! This is a character voice preview.",
+    u"Озвучка выключена или провайдер недоступен.": u"Voice synthesis is disabled or the provider is unavailable.",
+    u"Укажите Voice ID.": u"Enter a Voice ID.",
+    u"Некорректные настройки голоса персонажа.": u"Invalid character voice settings.",
+    u"VOICE ID": u"VOICE ID",
     u"КЛЮЧ ELEVENLABS": u"ELEVENLABS KEY",
     u"КЛЮЧ FISH AUDIO": u"FISH AUDIO KEY",
     u"ЖЕНСКИЙ ГОЛОС FISH · лупа — reference_id": u"FEMALE FISH VOICE · magnifier — reference_id",
@@ -136,6 +146,30 @@ EN = {
     u"Установить компоненты": u"Install components",
     u"Сохранить и применить": u"Save and apply",
     u"Конфиги": u"Configs",
+    u"Экспорт": u"Export",
+    u"Импорт": u"Import",
+    u"Экспорт содержит ключи API только с вашего согласия. Включить ключи?\n\n"
+    u"ZIP не зашифрован. Не публикуйте архив с ключами. «Нет» экспортирует без keys.json.":
+        u"API keys are exported only with your consent. Include keys?\n\n"
+        u"The ZIP is not encrypted. Do not share an archive containing keys. No exports without keys.json.",
+    u"Будут экспортированы сохранённые файлы (несохранённые изменения не включены):\n%s":
+        u"Saved files to export (unsaved changes are not included):\n%s",
+    u"Сохраните архив вне папки пользовательских данных.": u"Save the archive outside the user data folder.",
+    u"Архив сохранён.": u"Archive saved.",
+    u"Не удалось перенести данные. Проверьте архив, права доступа и допустимые размеры файлов.":
+        u"Data transfer failed. Check the archive, access permissions and file size limits.",
+    u"Будут заменены только перечисленные файлы; остальные сохранятся. "
+    u"Старые файлы попадут в import_backups.\n\n%s\n\n"
+    u"Импорт закроет настройки и отменит несохранённые изменения. "
+    u"Сначала остановите игру и сервер, затем перезапустите их после импорта. Продолжить?":
+        u"Only the listed files will be replaced; other files will be kept. "
+        u"Previous files will be backed up in import_backups.\n\n%s\n\n"
+        u"Import closes settings and discards unsaved changes. "
+        u"Stop the game and server first, then restart them after import. Continue?",
+    u"Архив содержит ключи API; текущие ключи будут заменены.":
+        u"The archive contains API keys; current keys will be replaced.",
+    u"Данные импортированы. Перезапустите игру и сервер, затем откройте настройки заново.":
+        u"Data imported. Restart the game and server, then reopen settings.",
     u"Компоненты": u"Components",
     u"История ✕": u"History ✕",
     u"Сброс": u"Reset",
@@ -221,6 +255,16 @@ EN = {
         u"Could not load the map (es_ai_map_bg.b64.part* is missing next to the mod).",
     u"Локация пока неизвестна — начни разговор в игре.":
         u"Location is still unknown — start a conversation in the game.",
+    u"Бомбоубежище": u"Bomb Shelter",
+    u"Старый корпус внутри": u"Old Building Interior",
+    u"У библиотеки": u"Outside the Library",
+    u"Спуск в шахту": u"Mine Descent",
+    u"Комната в шахте": u"Mine Room",
+    u"Выход из шахты": u"Mine Exit",
+    u"Развилка шахты": u"Mine Crossroad",
+    u"Забой шахты": u"Mine Coalface",
+    u"Привал в шахте": u"Mine Rest Stop",
+    u"Автобус 410": u"Bus 410",
     u"«%s» — вне карты.": u"“%s” is off the map.",
     u"%s · %s · многоязычный": u"%s · %s · multilingual",
     u"✗ Win+H: %s": u"✗ Win+H: %s",

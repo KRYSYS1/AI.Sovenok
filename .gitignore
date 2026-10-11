@@ -46,3 +46,15 @@ desktop.ini
 
 # --- Промежуточные копии автообновления (apply_to_pc.py) ---
 *.esai-new
+
+# Extracted original-game sprites are local inspection material, not source.
+/Miku Sprites/
+/Olga Sprites/
+/Slavya Sprites/
+*.rpyc
+
+# Runtime state and user-data exports.
+story_events.json
+story_pending.json
+delivery_outbox.json
+AI.Sovenok.zip

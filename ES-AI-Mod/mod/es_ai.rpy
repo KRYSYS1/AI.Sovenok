@@ -167,6 +167,11 @@ init -10 python:
     # Порядок перебора одежды/дистанции при подборе спрайта
     ES_AI_DRESSES = ["pioneer", "sport", "dress", "swim", ""]
 
+    def es_ai_has_party_dress(char_id):
+        return any(renpy.has_image("%s %s dress%s" % (char_id, emo, distance), exact=True)
+                   for emo in ES_AI_EMOTIONS.get(char_id, [])
+                   for distance in ("", " close", " far"))
+
     def es_ai_resolve_sprite(char_id, emotion, dress_pref=None):
         """Эмоция -> существующий тег спрайта игры (с проверкой renpy.has_image).
         dress_pref — предпочтительная одежда (например swim на пляже)."""
@@ -177,17 +182,20 @@ init -10 python:
             if key not in vocab:
                 emotion = es_ai_fallback_emotion(char_id, key)
         candidates = []
+        if dress_pref not in ("pioneer", "pioneer2", "sport", "dress", "swim", "stethoscope"):
+            dress_pref = None
         if dress_pref:
             for emo in (emotion, "normal"):
                 base = "%s %s %s" % (char_id, emo, dress_pref)
                 for tag in (base + " close", base):
-                    if renpy.has_image(tag):
+                    if renpy.has_image(tag, exact=True):
                         return tag
         # Виола (cs): нет тега pioneer, есть вариант со стетоскопом.
         if char_id == "cs":
             candidates.append("%s %s stethoscope close" % (char_id, emotion))
             candidates.append("%s %s stethoscope" % (char_id, emotion))
-        dresses = ([dress_pref] if dress_pref else []) + ES_AI_DRESSES
+        fallback_dresses = ["pioneer", "pioneer2", ""]
+        dresses = ([dress_pref] if dress_pref else []) + fallback_dresses
         seen_d = set()
         dresses = [d for d in dresses if not (d in seen_d or seen_d.add(d))]
         for dress in dresses:
@@ -198,13 +206,13 @@ init -10 python:
                 candidates.append("%s %s close" % (char_id, emotion))
                 candidates.append(char_id + " " + emotion)
         for tag in candidates:
-            if renpy.has_image(tag):
+            if renpy.has_image(tag, exact=True):
                 return tag
         # Совсем ничего — нормальная эмоция
-        for dress in ES_AI_DRESSES:
+        for dress in fallback_dresses:
             base = "%s normal %s" % (char_id, dress) if dress else "%s normal" % char_id
             for tag in (base + " close", base):
-                if renpy.has_image(tag):
+                if renpy.has_image(tag, exact=True):
                     return tag
         return None
 
@@ -394,6 +402,7 @@ init 10 python:
 
     atexit.register(es_ai_stop_autostart)
     es_ai_start_server_async()
+    es_ai_log("live-chain-20261011 client loaded")
     es_ai_log("mod init, gamedir=%s, mod_dir=%s, rel=%r"
               % (config.gamedir, ES_AI_MOD_DIR, ES_AI_REL))
 

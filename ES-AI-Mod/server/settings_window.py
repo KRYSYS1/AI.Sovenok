@@ -34,6 +34,7 @@ import llm_client  # noqa: F401  (сервер использует; окно п
 import tts_client
 import stt_client
 import ui_i18n
+import user_data_transfer
 from characters_store import characters, get_character  # noqa: F401
 
 config_loader.reload_all()
@@ -45,31 +46,52 @@ def tr(text):
     return ui_i18n.tr(text() if callable(text) else text, ui_lang[0])
 keys = config_loader.keys
 
+
+def _log_window_error(text):
+    directory = (config_loader.user_data_dir() if hasattr(config_loader, "user_data_dir")
+                 else BASE_DIR)
+    path = os.path.join(directory, "settings_window_error.log")
+    with open(path, "a", encoding="utf-8") as stream:
+        stream.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))
+    return path
+
+
+def _show_error_box(text):
+    if os.name == "nt":
+        ctypes.windll.user32.MessageBoxW(None, str(text), tr(u"AI Совёнок — настройки"), 0x10)
+    else:
+        print(text, file=sys.stderr)
+
 # ---------------------------------------------------------------- провайдеры --
 # Все LLM — OpenAI-совместимые /chat/completions (как в KCD2 AI NPC и Smart Lolis).
 LLM_PROVIDERS = ["Groq", "Mistral", "OpenRouter", "OpenAI", "NVIDIA", "Cohere",
-                 "GitHub", "Ollama", "LM Studio", "Свой"]
+                 "Cerebras", "GitHub", "Ollama", "LM Studio", "Свой"]
 LLM_PRESETS = {
-    "Groq": ("https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile", "groq_api_key"),
-    "Mistral": ("https://api.mistral.ai/v1/chat/completions", "mistral-small-latest", "mistral_api_key"),
-    "OpenRouter": ("https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3.3-70b-instruct", "llm_api_key"),
-    "OpenAI": ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini", "openai_api_key"),
-    "NVIDIA": ("https://integrate.api.nvidia.com/v1/chat/completions", "meta/llama-3.3-70b-instruct", "nvidia_api_key"),
-    "Cohere": ("https://api.cohere.ai/compatibility/v1/chat/completions", "command-a-03-2025", "cohere_api_key"),
-    "GitHub": ("https://models.github.ai/inference/chat/completions", "openai/gpt-4o-mini", "github_api_key"),
-    "Ollama": ("http://localhost:11434/v1/chat/completions", "llama3.1:8b", ""),
-    "LM Studio": ("http://localhost:1234/v1/chat/completions", "local-model", ""),
-    "Свой": ("http://127.0.0.1:8080/v1/chat/completions", "model-name", "custom_llm_api_key"),
+    "Groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "groq_api_key"),
+    "Mistral": ("https://api.mistral.ai/v1", "mistral-small-latest", "mistral_api_key"),
+    "OpenRouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct", "llm_api_key"),
+    "OpenAI": ("https://api.openai.com/v1", "gpt-4o-mini", "openai_api_key"),
+    "NVIDIA": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct", "nvidia_api_key"),
+    "Cohere": ("https://api.cohere.ai/compatibility/v1", "command-a-03-2025", "cohere_api_key"),
+    "Cerebras": ("https://api.cerebras.ai/v1", "qwen-3.8-27b", "cerebras_api_key"),
+    "GitHub": ("https://models.github.ai/inference", "openai/gpt-4o-mini", "github_api_key"),
+    "Ollama": ("http://localhost:11434/v1", "llama3.1:8b", ""),
+    "LM Studio": ("http://localhost:1234/v1", "local-model", ""),
+    "Свой": ("http://127.0.0.1:8080/v1", "model-name", "custom_llm_api_key"),
 }
 # Где брать список моделей, если это не {base}/models
 MODELS_URLS = {
     "GitHub": "https://models.github.ai/catalog/models",
     "Cohere": "https://api.cohere.com/v1/models?endpoint=chat&page_size=200",
+    "Cerebras": "https://api.cerebras.ai/v1/models",
 }
+MODEL_FALLBACKS = {"Cerebras": ["qwen-3.8-27b", "gpt-oss-120b"]}
+LLM_MAP = {name.lower(): name for name in LLM_PROVIDERS if name not in ("LM Studio", "Свой")}
+LLM_MAP.update(lmstudio="LM Studio", custom="Свой")
 PROVIDER_KEYNAME = {"groq": "groq_api_key", "mistral": "mistral_api_key",
                     "openrouter": "llm_api_key", "openai": "openai_api_key",
                     "nvidia": "nvidia_api_key", "cohere": "cohere_api_key",
-                    "github": "github_api_key"}
+                    "github": "github_api_key", "cerebras": "cerebras_api_key"}
 KEY_URLS = {
     "groq_api_key": "https://console.groq.com/keys",
     "mistral_api_key": "https://console.mistral.ai/api-keys/",
@@ -77,12 +99,13 @@ KEY_URLS = {
     "openai_api_key": "https://platform.openai.com/api-keys",
     "nvidia_api_key": "https://build.nvidia.com/settings/api-keys",
     "cohere_api_key": "https://dashboard.cohere.com/api-keys",
+    "cerebras_api_key": "https://cloud.cerebras.ai",
     "github_api_key": "https://github.com/settings/personal-access-tokens",
     "elevenlabs_api_key": "https://elevenlabs.io/app/settings/api-keys",
     "fish_api_key": "https://fish.audio/app/api-keys/",
 }
 ALL_KEYS = ("groq_api_key", "mistral_api_key", "llm_api_key", "openai_api_key",
-            "nvidia_api_key", "cohere_api_key", "github_api_key",
+            "nvidia_api_key", "cohere_api_key", "cerebras_api_key", "github_api_key",
             "elevenlabs_api_key", "fish_api_key", "custom_tts_api_key", "custom_llm_api_key")
 
 TTS_PROVIDERS = ["Авто", "ElevenLabs", "Fish Audio", "edge-tts", "OpenAI", "SAPI", "Свой", "Выключено"]
@@ -223,6 +246,12 @@ ES_MAP_PIN = {
     "beach": (820, 455), "island": (400, 600), "boathouse": (547, 517),
     "bathhouse": (500, 470), "old_building": (177, 615),
     "catacombs": (205, 598), "mine": (235, 582),
+    "bunker": (205, 638),
+    "old_building_inside": (150, 615), "library_ext": (748, 225),
+    "mine_descent": (235, 615), "mine_crossroad": (270, 582),
+    "mine_room": (270, 550), "mine_coalface": (305, 550),
+    "mine_halt": (305, 615), "mine_exit": (555, 280),
+    "bus_410": (60, 245),
 }
 
 
@@ -849,12 +878,11 @@ def run_settings_window():
         threading.Thread(target=worker, daemon=True).start()
 
     # --------------------------------------------------------- переменные ---
-    prov_display = {"groq": "Groq", "mistral": "Mistral", "openrouter": "OpenRouter",
-                    "openai": "OpenAI", "nvidia": "NVIDIA", "cohere": "Cohere",
-                    "github": "GitHub", "ollama": "Ollama", "lmstudio": "LM Studio",
-                    "custom": "Свой"}
+    prov_display = LLM_MAP
     llm_cfg = cfg.setdefault("llm", {})
     tts_cfg = cfg.setdefault("tts", {})
+    character_overrides = {cid: dict(value) if isinstance(value, dict) else value
+                           for cid, value in (tts_cfg.get("character_overrides") or {}).items()}
     stt_cfg = cfg.setdefault("stt", {})
     llm_provider_var = tk.StringVar(value=prov_display.get(llm_cfg.get("provider", "groq"), "Groq"))
     url_var = tk.StringVar(value=llm_cfg.get("api_url", ""))
@@ -934,20 +962,115 @@ def run_settings_window():
         return res[0]
 
     # ----------------------------------------------------------- действия ---
+    native_vars = []
+    saved_state = [None]
+
+    def settings_snapshot():
+        return (tuple(root.getvar(str(var)) for var in native_vars),
+                (cameo_on[0], auto_primary_on[0], activity_on[0], clock_on[0], clock_show_time[0], story_on[0], story_intensity[0], ui_lang[0]),
+                json.dumps({cid: dict(value, provider="auto" if value.get("provider", "auto") == "inherit"
+                                      else value.get("provider", "auto"), voice_id=value.get("voice_id", "").strip())
+                            if isinstance(value, dict) else value
+                            for cid, value in character_overrides.items()},
+                           sort_keys=True, ensure_ascii=False))
+
+    def prompt_dirty():
+        if not prompt_targets:
+            return False
+        tid, name, is_player = prompt_targets[prompt_idx[0]]
+        stored = (prompt_data.get("player") or {}) if is_player else next(
+            (c for c in prompt_data.get("characters", []) if c.get("id") == tid), {})
+        return persona_text.get("1.0", "end-1c").strip() != stored.get("persona", "").strip()
+
+    def refresh_save_state():
+        if saved_state[0] is None:
+            return
+        name_dirty = (player_name_var.get().strip() or u"Семён") != (
+            prompt_data.get("player") or {}).get("name", u"Семён")
+        persona_dirty = prompt_dirty()
+        pr_save.set_selected(persona_dirty or name_dirty)
+        kind = "primary" if (settings_snapshot() != saved_state[0] or
+                             name_dirty or persona_dirty) else "chip"
+        if b_save.kind != kind:
+            b_save.kind = kind
+            b_save._paint()
+
+    def schedule_save_state(*_args):
+        root.after_idle(refresh_save_state)
+
+    def persona_modified(_event=None):
+        if not persona_text.edit_modified():
+            return
+        persona_text.edit_modified(False)
+        schedule_save_state()
+
+    def save_current_prompt():
+        # Merge only the edited fields into the latest file, not the startup copy.
+        try:
+            with open(chars_path, encoding="utf-8") as f:
+                latest = json.load(f)
+        except FileNotFoundError:
+            latest = dict(prompt_data)
+        player = dict(latest.get("player") or {})
+        player.update(id="player", name=player_name_var.get().strip() or u"Семён")
+        if prompt_targets:
+            tid, name, is_player = prompt_targets[prompt_idx[0]]
+            persona = persona_text.get("1.0", "end-1c").strip()
+            if is_player:
+                player["persona"] = persona
+            else:
+                character = next(c for c in latest.get("characters", []) if c.get("id") == tid)
+                character["persona"] = persona
+        latest["player"] = player
+        with open(chars_path, "w", encoding="utf-8") as f:
+            json.dump(latest, f, ensure_ascii=False, indent=2)
+        prompt_data.clear()
+        prompt_data.update(latest)
+        for i, (tid, name, is_player) in enumerate(prompt_targets):
+            if is_player:
+                prompt_targets[i] = (tid, player["name"], True)
+                pr_chips[i].retranslate()
+        persona_who.retranslate()
+
     def save_all(notify=True):
-        clock = clock_values()
+        flush_character_voice()
+        # Часы: revision бампится ТОЛЬКО при реальном изменении включения/времени/шага
+        # относительно on-disk конфига (замена кнопки «Установить время»).
+        try:
+            on_disk = clock_read_config()
+            prev = on_disk.get("game_clock")
+            prev = prev if isinstance(prev, dict) else {}
+            prev_vals = (prev.get("enabled") is True,
+                         (prev.get("start_time") or u"").strip(),
+                         prev.get("minutes_per_exchange"))
+            new_vals = (bool(clock_on[0]), clock_time_var.get().strip(),
+                        clock_values()["minutes_per_exchange"]
+                        if clock_values() is not None else None)
+            clock_reset = new_vals[1] and prev_vals != new_vals
+        except Exception:
+            clock_reset = False
+        clock = clock_values(reset=clock_reset)
         if clock is None:
             return False
+        if not clock_reset:
+            # Сохраняем прежний revision: время в игре не сбрасывается,
+            # если пользователь ничего не менял в настройках часов.
+            on_disk = clock_read_config()
+            prev = on_disk.get("game_clock")
+            prev = prev if isinstance(prev, dict) else {}
+            clock["revision"] = prev.get("revision", clock["revision"])
         llm_cfg["provider"] = {v: k for k, v in prov_display.items()}[llm_provider_var.get()]
         llm_cfg["api_url"] = url_var.get().strip()
         llm_cfg["model"] = model_var.get().strip()
+        config_loader.normalize_llm_urls(cfg)
+        url_var.set(llm_cfg["api_url"])
         try:
             llm_cfg["max_tokens"] = int(max_tokens_var.get())
         except Exception:
             pass
         llm_cfg["temperature"] = round(float(temperature_var.get()), 2)
         if llm_provider_var.get() == u"Свой":
-            llm_cfg["custom_api_url"] = url_var.get().strip()
+            llm_cfg["custom_api_url"] = llm_cfg["api_url"]
             llm_cfg["custom_model"] = model_var.get().strip()
         cfg["cameo_enabled"] = bool(cameo_on[0])
         cfg["cameo_stay"] = bool(cameo_on[0])
@@ -957,6 +1080,8 @@ def run_settings_window():
         cfg["cameo_ctx"] = int(cameo_ctx_var.get())
         cfg["ui_lang"] = ui_lang[0]
         tts_cfg["provider"] = TTS_MAP[tts_var.get()]
+        tts_cfg["character_overrides"] = {cid: dict(value) if isinstance(value, dict) else value
+                                          for cid, value in character_overrides.items()}
         tts_cfg["custom_tts_url"] = custom_tts_var.get().strip()
         tts_cfg["fish_voice_female"] = fish_voice_var.get().strip()
         tts_cfg["fish_voice_male"] = fish_voice_m_var.get().strip()
@@ -989,20 +1114,18 @@ def run_settings_window():
         for name in key_vars:
             keys[name] = key_vars[name].get().strip()
         cfg["game_clock"] = clock
+        cfg["scene_auto_primary"] = bool(auto_primary_on[0])
+        cfg["npc_activity_enabled"] = bool(activity_on[0])
         cfg["story_events"] = dict(enabled=bool(story_on[0]), intensity=story_intensity[0])
-        # The player name is edited in the immersion tab but must follow the
-        # main Save button too, otherwise the running server keeps the old name.
         try:
-            player = dict(prompt_data.get("player") or {})
-            player["id"] = "player"
-            player["name"] = player_name_var.get().strip() or u"Семён"
-            prompt_data["player"] = player
-            with open(chars_path, "w", encoding="utf-8") as f:
-                json.dump(prompt_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        config_loader.save_config()
-        config_loader.save_keys()
+            config_loader.save_config()
+            config_loader.save_keys()
+            save_current_prompt()
+        except Exception as e:
+            set_status(tr(u"✗ Ошибка: %s") % tr(str(e)), False)
+            return False
+        saved_state[0] = settings_snapshot()
+        refresh_save_state()
         try:
             _post("/reload")
             if notify:
@@ -1010,10 +1133,12 @@ def run_settings_window():
         except Exception:
             if notify:
                 set_status(u"сохранено в файлы (сервер не ответил)", False)
+        return True
 
     def test_llm():
         """Проверяем РОВНО то, что сейчас в полях (URL/ключ/модель), прямым запросом."""
-        save_all(notify=False)
+        if not save_all(notify=False):
+            return
         url = url_var.get().strip()
         model = model_var.get().strip()
         kn = provider_keyname()
@@ -1024,6 +1149,13 @@ def run_settings_window():
         def job():
             if not url:
                 return u"✗ Не указан API URL."
+            from llm_client import normalize_chat_url, LlmError
+            try:
+                target = normalize_chat_url(url)
+            except LlmError as e:
+                return str(e)
+            if model in ("", "model-name"):
+                return "No LLM model selected; choose a model in settings"
             if kn and not key:
                 return u"✗ Нет ключа API для %s — нажми «Получить ключ ↗»." % prov
             body = json.dumps({
@@ -1032,7 +1164,7 @@ def run_settings_window():
                              {"role": "user", "content": "ping"}],
                 "max_tokens": 20, "temperature": 0.2,
             }).encode("utf-8")
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(target, data=body, headers={"Content-Type": "application/json"})
             if key:
                 req.add_header("Authorization", "Bearer " + key)
             t0 = time.time()
@@ -1290,57 +1422,66 @@ def run_settings_window():
         if not want_settings and not want_keys:
             return
         if want_settings:
+            character_overrides.clear()
+            load_character_voice()
             story_on[0] = False
             story_sw.set_on(False)
             select_story_intensity("low")
             clock_on[0] = False
+            auto_primary_on[0] = False
+            auto_primary_sw.set_on(False)
+            activity_on[0] = True
+            activity_sw.set_on(True)
             clock_sw.set_on(False)
+            clock_show_time[0] = True
+            clock_show_sw.set_on(True)
             clock_time_var.set("08:00")
             clock_step_var.set("5")
-        llm_provider_var.set(DEFAULTS["provider"])
-        url, model, _kn = LLM_PRESETS[DEFAULTS["provider"]]
-        url_var.set(url)
-        model_var.set(model)
-        max_tokens_var.set(str(DEFAULTS["max_tokens"]))
-        temperature_var.set(DEFAULTS["temperature"])
-        temp_val.set(u"%0.2f" % DEFAULTS["temperature"])
-        tts_var.set(DEFAULTS["tts"])
-        stt_var.set(DEFAULTS["stt"])
-        custom_tts_var.set("")
-        fish_voice_var.set("6dc11f3f67a543f6ad4537a4a347e224")
-        fish_voice_m_var.set("")
-        fish_model_var.set("s2.1-pro-free")
-        el_voice_var.set("EXAVITQu4vr4xnSDxMaL")
-        el_voice_m_var.set("")
-        el_model_var.set("eleven_multilingual_v2")
-        oa_model_var.set("tts-1")
-        oa_voice_var.set("nova")
-        oa_voice_m_var.set("onyx")
-        _ef, _em = ui_i18n.EDGE_VOICES.get(ui_lang[0], ui_i18n.EDGE_VOICES["ru"])
-        edge_f_var.set(_ef)
-        edge_m_var.set(_em)
-        sapi_voice_var.set("")
-        sapi_voice_m_var.set("")
-        cu_model_var.set("tts-1")
-        cu_voice_f_var.set("nova")
-        cu_voice_m_var.set("onyx")
-        cameo_on[0] = True
-        cameo_sw.set_on(True)
-        cameo_freq_var.set(25)
-        cf_val.set(u"25%")
-        cameo_lines_var.set(2)
-        cl_val.set(u"2")
-        cameo_interject_var.set(35)
-        ci_val.set(u"35%")
-        cameo_ctx_var.set(70)
-        cx_val.set(u"70%")
+            llm_provider_var.set(DEFAULTS["provider"])
+            url, model, _kn = LLM_PRESETS[DEFAULTS["provider"]]
+            url_var.set(url)
+            model_var.set(model)
+            max_tokens_var.set(str(DEFAULTS["max_tokens"]))
+            temperature_var.set(DEFAULTS["temperature"])
+            temp_val.set(u"%0.2f" % DEFAULTS["temperature"])
+            tts_var.set(DEFAULTS["tts"])
+            stt_var.set(DEFAULTS["stt"])
+            custom_tts_var.set("")
+            fish_voice_var.set("6dc11f3f67a543f6ad4537a4a347e224")
+            fish_voice_m_var.set("")
+            fish_model_var.set("s2.1-pro-free")
+            el_voice_var.set("EXAVITQu4vr4xnSDxMaL")
+            el_voice_m_var.set("")
+            el_model_var.set("eleven_multilingual_v2")
+            oa_model_var.set("tts-1")
+            oa_voice_var.set("nova")
+            oa_voice_m_var.set("onyx")
+            _ef, _em = ui_i18n.EDGE_VOICES.get(ui_lang[0], ui_i18n.EDGE_VOICES["ru"])
+            edge_f_var.set(_ef)
+            edge_m_var.set(_em)
+            sapi_voice_var.set("")
+            sapi_voice_m_var.set("")
+            cu_model_var.set("tts-1")
+            cu_voice_f_var.set("nova")
+            cu_voice_m_var.set("onyx")
+            cameo_on[0] = True
+            cameo_sw.set_on(True)
+            cameo_freq_var.set(25)
+            cf_val.set(u"25%")
+            cameo_lines_var.set(2)
+            cl_val.set(u"2")
+            cameo_interject_var.set(35)
+            ci_val.set(u"35%")
+            cameo_ctx_var.set(70)
+            cx_val.set(u"70%")
         if want_keys:
             for k in key_vars:
                 key_vars[k].set(u"")
         for r in (llm_refresh, tts_refresh, stt_refresh):
             r()
         sync_key_field()
-        save_all(notify=False)
+        if not save_all(notify=False):
+            return
         if want_settings and want_keys:
             set_status(u"сброшено: настройки и ключи", True)
         elif want_keys:
@@ -1357,35 +1498,7 @@ def run_settings_window():
     badge_txt = canvas.create_text(0, 0, text=tr(u"сервер: проверяю…"), font=FS, fill=INK, anchor="w")
     status = {"msg": tr(u"сервер: проверяю…"), "ok": None}
 
-    lang_style = ttk.Style(root)
-    try:
-        lang_style.theme_use("clam")
-    except Exception:
-        pass
-    lang_style.configure(
-        "Lang.TCombobox",
-        fieldbackground=PARCH_HEX, background="#e6d7b2", foreground=INK,
-        arrowcolor=INK, bordercolor="#92703e", lightcolor=PARCH_HEX,
-        darkcolor="#92703e", padding=2)
-    lang_style.map("Lang.TCombobox",
-                   fieldbackground=[("readonly", PARCH_HEX)],
-                   foreground=[("readonly", INK)],
-                   selectbackground=[("readonly", PARCH_HEX)],
-                   selectforeground=[("readonly", INK)])
     lang_var = tk.StringVar(value=u"English" if ui_lang[0] == "en" else u"Русский")
-    lang_btn = Chip(u"Язык/Lang", None, managed=False, h=28, padx=10, font=FS)
-    lang_box = ttk.Combobox(
-        root, textvariable=lang_var, values=(u"Русский", u"English"),
-        state="readonly", width=10, font=FS, style="Lang.TCombobox")
-
-    def post_lang(_e=None):
-        lang_box.focus_set()
-        try:
-            lang_box.tk.call("ttk::combobox::Post", lang_box._w)
-        except Exception:
-            pass
-
-    lang_btn.command = post_lang
 
     def on_lang_selected(_e=None):
         code = "en" if lang_var.get() == u"English" else "ru"
@@ -1397,10 +1510,29 @@ def run_settings_window():
         edge_f_var.set(female)
         edge_m_var.set(male)
         apply_language()
-        save_all(notify=False)
-        set_status(tr(u"Язык переключён, голоса edge-tts подставлены"), True)
+        if save_all(notify=False):
+            set_status(tr(u"Язык переключён, голоса edge-tts подставлены"), True)
 
-    lang_box.bind("<<ComboboxSelected>>", on_lang_selected)
+    def select_language(value):
+        lang_var.set(value)
+        on_lang_selected()
+
+    lang_menu = tk.Menu(root, tearoff=0, bg=PARCH_HEX, fg=INK,
+                        activebackground="#eaa842", activeforeground=INK_ON_HONEY,
+                        relief="flat", bd=0, font=FS)
+    for language in (u"Русский", u"English"):
+        lang_menu.add_command(label=language,
+                              command=lambda value=language: select_language(value))
+
+    def show_language_menu():
+        try:
+            lang_menu.tk_popup(canvas.winfo_rootx() + lang_btn.x,
+                               canvas.winfo_rooty() + lang_btn.y + lang_btn.h)
+        finally:
+            lang_menu.grab_release()
+
+    lang_btn = Chip(u"Язык/Lang", show_language_menu,
+                    font=FS, h=28, padx=14, managed=False)
 
     def layout_badge(w):
         tw = measure(status["msg"], FS)
@@ -1414,13 +1546,7 @@ def run_settings_window():
         canvas.coords(badge_txt, x + 30, y + bh / 2)
         for i in (badge_img, badge_dot, badge_txt):
             canvas.tag_raise(i)
-        combo_w = 112
-        gap = 8
-        lx = x - 14 - lang_btn.nat_w - gap - combo_w
-        lang_btn.place(lx, y - 1)
-        lang_box.place(in_=canvas, x=lx + lang_btn.nat_w + gap, y=y + 1,
-                       width=combo_w, height=bh - 2)
-        lang_box.lift()
+        lang_btn.place(x - 14 - lang_btn.nat_w, y)
 
     def set_status(msg, ok=None):
         msg = tr(msg)
@@ -1450,6 +1576,7 @@ def run_settings_window():
 
     def switch_tab(idx):
         close_models()
+        close_lookup()
         cur_tab[0] = idx
         for i, t in enumerate(tabs):
             t.set_selected(i == idx)
@@ -1574,7 +1701,7 @@ def run_settings_window():
 
         key_l.place(x0, y + 8)
         kw = cw
-        if provider_keyname():
+        if provider_keyname() and llm_provider_var.get() != u"Свой":
             key_link.place(x1 - key_link.nat_w, y + LBL)
             kw = cw - key_link.nat_w - 10
             key_hint.place(x0 + kw, y + 8)
@@ -1609,7 +1736,12 @@ def run_settings_window():
         url = url_var.get().strip()
         kn = provider_keyname()
         key = key_vars[kn].get().strip() if kn else ""
-        murl = MODELS_URLS.get(prov) or (url.split("/chat/completions")[0].rstrip("/") + "/models")
+        import urllib.parse
+        parts = urllib.parse.urlsplit(url)
+        path = parts.path.rstrip("/")
+        if path.endswith("/chat/completions"):
+            path = path[:-len("/chat/completions")]
+        murl = MODELS_URLS.get(prov) or urllib.parse.urlunsplit(parts._replace(path=path + "/models", fragment=""))
         return murl, key
 
     def _parse_models(payload):
@@ -1655,7 +1787,12 @@ def run_settings_window():
                 refill_models(show_all=True)
         else:
             if models["want"] == murl:
-                close_models()
+                fallback = MODEL_FALLBACKS.get(llm_provider_var.get())
+                if fallback:
+                    models["ids"] = list(fallback)
+                    refill_models(show_all=True)
+                else:
+                    close_models()
             show_result("llm", res)
 
     def open_models():
@@ -2021,10 +2158,11 @@ def run_settings_window():
         _build_lookup()
         lookup["loading"] = True
         _lookup_message(u"загружаю список…")
+        query = var.get().strip()
 
         def job():
             try:
-                res = loader(var.get().strip())
+                res = loader(query)
             except Exception as e:
                 res = u"✗ %s" % e
             return (token, res)
@@ -2039,7 +2177,7 @@ def run_settings_window():
             show_result("tts", msg if isinstance(msg, str) else u"✗ странный ответ списка")
             return
         token, res = msg
-        if token != lookup["token"] or lookup["top"] is None:
+        if token != lookup["token"] or lookup["top"] is None or not voice_lookup_current():
             return
         lookup["loading"] = False
         if isinstance(res, str):
@@ -2130,6 +2268,9 @@ def run_settings_window():
         shown = lookup.get("shown") or []
         if sel[0] >= len(shown):
             return
+        if not voice_lookup_current():
+            close_lookup()
+            return
         lookup["var"].set(shown[sel[0]][1])
         try:
             lookup["entry"].icursor("end")
@@ -2146,10 +2287,228 @@ def run_settings_window():
                 pass
         lookup["top"] = lookup["lb"] = lookup["sb"] = None
         lookup["loading"] = False
+        lookup.pop("row", None)
+        lookup["token"] += 1
 
     # ================================================= вкладка 1: TTS =======
     tts_sec = label(u"ПРОВАЙДЕР ОЗВУЧКИ", SECTION)
     tts_chips, tts_refresh = chip_row(TTS_PROVIDERS, tts_var, lambda: layout())
+    individual_sec = label(u"ИНДИВИДУАЛЬНЫЕ ГОЛОСА", SECTION)
+    individual_character_l = label(u"ПЕРСОНАЖ")
+    individual_provider_l = label(u"ПРОВАЙДЕР")
+    individual_voice_l = label(u"VOICE ID")
+    individual_providers = {value: (u"Общий провайдер" if value == "auto" else name)
+                            for name, value in TTS_MAP.items()}
+    individual_rows = {}
+    voice_preview_busy = [False]
+    result_txt["voice_preview"] = Txt(u"", FS, HINT)
+
+    def preview_character_voice(row):
+        if individual_rows.get(row["cid"]) is not row or voice_preview_busy[0]:
+            return
+        voice = row["voice_var"].get().strip()
+        provider = row["provider_var"].get()
+        global_provider = TTS_MAP.get(tts_var.get(), "auto")
+        if not voice:
+            show_result("voice_preview", u"✗ Укажите Voice ID.")
+            return
+        if provider == "off" or global_provider == "off":
+            show_result("voice_preview", u"✗ Озвучка выключена.")
+            return
+        if provider == "auto":
+            provider = global_provider
+        if provider == "auto":
+            available = tts_client.available_providers()
+            provider = next((p for p in ("elevenlabs", "fish", "edge", "sapi", "openai", "custom")
+                             if available.get(p)), "off")
+        override = {"provider": provider, "voice_id": voice}
+        character = next((dict(c) for c in prompt_data.get("characters", []) if c.get("id") == row["cid"]),
+                         {"id": row["cid"]})
+        voice_preview_busy[0] = True
+        show_result("voice_preview", u"Прослушать голос")
+
+        def job():
+            try:
+                path, info = tts_client.synthesize(tr(u"Привет! Это проверка голоса персонажа."),
+                                                   character, False, character_override=override)
+                if not path:
+                    reason = {"tts_disabled": u"Озвучка выключена или провайдер недоступен.",
+                              "empty_voice_id": u"Укажите Voice ID.",
+                              "invalid_character_override": u"Некорректные настройки голоса персонажа."}.get(info, info)
+                    return tr(u"✗ TTS: %s") % tr(reason)
+                play_mp3(path)
+                return tr(u"✓ Голос готов (%s), играю…") % info
+            finally:
+                voice_preview_busy[0] = False
+        bg("voice_preview", job)
+
+    def refresh_voice_rows():
+        for cid in list(individual_rows):
+            if cid in character_overrides:
+                continue
+            row = individual_rows.pop(cid)
+            row["generation"] += 1
+            if lookup.get("row") is row:
+                close_lookup()
+            for var, trace in row["traces"]:
+                var.trace_remove("write", trace)
+            for control in row["controls"]:
+                control.hide()
+                MANAGED.remove(control)
+                if control in I18N_WIDGETS:
+                    I18N_WIDGETS.remove(control)
+                if isinstance(control, Field):
+                    canvas.delete(control.img_id)
+                    for widget in (control.widget, control.icon):
+                        lookup_icons.discard(widget)
+                        widget.destroy()
+                else:
+                    for event in ("<Enter>", "<Leave>", "<ButtonRelease-1>"):
+                        canvas.tag_unbind(control.tag, event)
+                    canvas.delete(control.tag)
+        for cid, entry in character_overrides.items():
+            if cid not in individual_rows:
+                row = {"cid": cid, "generation": 0, "loading": True,
+                       "provider_var": tk.StringVar(value="auto"), "voice_var": tk.StringVar(value="")}
+                row["character"] = Chip(cid, lambda r=row: voice_menu(
+                    r["character"], [(ident, name) for ident, name in voice_targets
+                                     if ident == r["cid"] or ident not in character_overrides],
+                    lambda ident: rename_voice_character(r, ident)), padx=12)
+                row["provider"] = Chip(u"Общий провайдер", lambda r=row: voice_menu(
+                    r["provider"], individual_providers.items(),
+                    lambda provider: select_voice_provider(r, provider)), padx=12)
+                row["voice"] = lookup_field(row["voice_var"], load_openai_voices)
+                row["voice"].icon.bind("<Button-1>", lambda e, r=row: lookup_character_voice(r))
+                row["voice"].widget.bind("<Down>", lambda e, r=row: lookup_character_voice(r))
+                row["preview"] = Chip(u"\U0001f50a", lambda r=row: preview_character_voice(r),
+                                      font=("Segoe UI Symbol", 12), h=34, padx=0, min_w=34)
+                row["preview"].nat_w = 34
+                canvas.tag_bind(row["preview"].tag, "<Enter>",
+                                lambda e: set_status(u"Прослушать голос"), add="+")
+                row["remove"] = Chip(u"×", lambda r=row: remove_voice_character(r["cid"]),
+                                     h=34, padx=0, min_w=34)
+                row["remove"].nat_w = 34
+                row["controls"] = [row[key] for key in ("character", "provider", "voice", "preview", "remove")]
+                row["traces"] = [(var, var.trace_add("write", lambda *_args, r=row: flush_character_voice(r)))
+                                 for var in (row["provider_var"], row["voice_var"])]
+                individual_rows[cid] = row
+            entry = entry if isinstance(entry, dict) else {}
+            name = next((name for ident, name in voice_targets if ident == cid), cid)
+            provider = entry.get("provider", "auto")
+            provider = "auto" if provider == "inherit" else provider
+            row = individual_rows[cid]
+            if row["loading"]:
+                row["provider_var"].set(provider)
+                row["voice_var"].set(entry.get("voice_id", ""))
+                row["loading"] = False
+            row["character"].set_text(name)
+            row["provider"].set_text(individual_providers.get(row["provider_var"].get(), provider))
+
+    def flush_character_voice(row=None):
+        if row is None:
+            for current in individual_rows.values():
+                flush_character_voice(current)
+            return
+        cid = row["cid"]
+        if row["loading"] or individual_rows.get(cid) is not row or cid not in character_overrides:
+            return
+        provider = row["provider_var"].get()
+        voice_id = row["voice_var"].get().strip()
+        previous = character_overrides.get(cid)
+        entry = dict(previous) if isinstance(previous, dict) else {}
+        old_provider = entry.get("provider", "auto")
+        if ("auto" if old_provider == "inherit" else old_provider) != provider or entry.get("voice_id", "") != voice_id:
+            entry.update(provider=provider, voice_id=voice_id)
+            character_overrides[cid] = entry
+        row["provider"].set_text(individual_providers.get(provider, provider))
+        schedule_save_state()
+
+    def load_character_voice():
+        close_lookup()
+        for row in individual_rows.values():
+            row["generation"] += 1
+            row["loading"] = True
+        refresh_voice_rows()
+
+    def add_voice_character(cid):
+        if cid in character_overrides or cid not in dict(voice_targets):
+            return
+        flush_character_voice()
+        character_overrides[cid] = {"provider": "auto", "voice_id": ""}
+        refresh_voice_rows()
+        layout()
+        schedule_save_state()
+
+    def remove_voice_character(cid):
+        flush_character_voice()
+        character_overrides.pop(cid, None)
+        refresh_voice_rows()
+        schedule_save_state()
+        layout()
+
+    def rename_voice_character(row, cid):
+        old = row["cid"]
+        if old not in character_overrides or cid in character_overrides or cid not in dict(voice_targets):
+            return
+        flush_character_voice(row)
+        close_lookup()
+        character_overrides[cid] = character_overrides.pop(old)
+        individual_rows[cid] = individual_rows.pop(old)
+        row["cid"] = cid
+        row["generation"] += 1
+        refresh_voice_rows()
+        layout()
+        schedule_save_state()
+
+    def select_voice_provider(row, provider):
+        close_lookup()
+        row["generation"] += 1
+        row["provider_var"].set(provider)
+        layout()
+
+    individual_menu = tk.Menu(root, tearoff=0, bg=PARCH_HEX, fg=INK,
+                       activebackground="#eaa842", activeforeground=INK_ON_HONEY, font=F)
+
+    def voice_menu(chip, choices, select):
+        close_lookup()
+        menu = individual_menu
+        menu.delete(0, "end")
+        for value, text in choices:
+            menu.add_command(label=tr(text), command=lambda v=value: select(v))
+        try:
+            menu.tk_popup(canvas.winfo_rootx() + chip.x, canvas.winfo_rooty() + chip.y + chip.h)
+        finally:
+            menu.grab_release()
+
+    individual_add = Chip(u"Добавить персонажа", lambda: voice_menu(
+        individual_add, [(cid, name) for cid, name in voice_targets
+                         if cid not in character_overrides], add_voice_character), padx=12)
+    def voice_lookup_current():
+        row = lookup.get("row")
+        return row is None or (individual_rows.get(lookup.get("character_id")) is row
+                               and row["cid"] == lookup.get("character_id")
+                               and row["generation"] == lookup.get("row_generation"))
+
+    def lookup_character_voice(row):
+        if individual_rows.get(row["cid"]) is not row:
+            return "break"
+        provider = row["provider_var"].get()
+        if provider == "auto":
+            provider = TTS_MAP[tts_var.get()]
+        if provider == "auto":
+            available = tts_client.available_providers()
+            provider = next((name for name in ("elevenlabs", "fish", "edge", "sapi", "openai", "custom")
+                             if available.get(name)), "off")
+        loader = {"edge": load_edge_voices, "elevenlabs": load_eleven_voices,
+                  "fish": load_fish_voices, "openai": load_openai_voices,
+                  "sapi": load_sapi_voices, "custom": load_openai_voices}.get(provider)
+        if loader is not None:
+            open_lookup(row["voice"], row["voice"].widget, row["voice_var"], loader)
+            if lookup["top"] is not None:
+                lookup.update(row=row, character_id=row["cid"], row_generation=row["generation"])
+        return "break"
+
+    tts_var.trace_add("write", lambda *_args: close_lookup())
     el_l = label(u"КЛЮЧ ELEVENLABS")
     el_f = field(key_vars["elevenlabs_api_key"], show="•")
     el_link = key_link_chip(lambda: "elevenlabs_api_key")
@@ -2211,7 +2570,12 @@ def run_settings_window():
         "off": u"Озвучка выключена: героини будут отвечать только текстом.",
     }
 
-    def lay_tts(x0, x1, y, bottom):
+    def lay_tts(x0, x1, y, bottom, _fixed=None):
+        fixed = {obj for obj in MANAGED if obj._pass == PASS[0]} if _fixed is None else _fixed
+        top = y
+        x1 -= 20
+        y -= tts_scroll[0]
+        start = y
         cw = x1 - x0
         tts_sec.place(x0, y + 8)
         y = flow(tts_chips, x0, y + LBL + 2, cw) + 22
@@ -2302,6 +2666,45 @@ def run_settings_window():
         tts_test_m.place(x0 + tts_test.nat_w + 8, y + 4)
         result_txt["tts"].place(x0 + tts_test.nat_w + tts_test_m.nat_w + 24, y + 4 + H / 2.0,
                                 width=max(40, cw - tts_test.nat_w - tts_test_m.nat_w - 24))
+        y += H + 20
+        individual_sec.place(x0, y + 8)
+        y += LBL + 12
+        refresh_voice_rows()
+        character_w, provider_w = int(cw * .26), int(cw * .28)
+        provider_x = x0 + character_w + 10
+        voice_x = provider_x + provider_w + 10
+        if character_overrides:
+            individual_character_l.place(x0, y + 8)
+            individual_provider_l.place(provider_x, y + 8)
+            individual_voice_l.place(voice_x, y + 8)
+            y += LBL
+        for cid in character_overrides:
+            row = individual_rows[cid]
+            row["character"].place(x0, y, character_w)
+            row["provider"].place(provider_x, y, provider_w)
+            row["voice"].place(voice_x, y, x1 - voice_x - 88, H)
+            row["preview"].place(x1 - 78, y, 34)
+            row["remove"].place(x1 - 34, y, 34)
+            y += H + 8
+        individual_add.place(x0, y)
+        y += H + 12
+        result_txt["voice_preview"].place(x0, y + 8, width=cw)
+        content = y + H + 16 - start
+        viewport = bottom - top
+        tts_scroll[1:] = [max(0, content - viewport), viewport]
+        if tts_scroll[0] > tts_scroll[1]:
+            tts_scroll[0] = tts_scroll[1]
+            return lay_tts(x0, x1 + 20, top, bottom, fixed)
+        if tts_scroll[1]:
+            tts_bar.place(in_=canvas, x=x1 + 4, y=top, width=16, height=viewport)
+            tts_bar.set(tts_scroll[0] / float(content), min(1, (tts_scroll[0] + viewport) / float(content)))
+        for obj in MANAGED:
+            if obj in fixed or obj._pass != PASS[0] or not obj.visible:
+                continue
+            target = getattr(obj, "tag", None) or getattr(obj, "id", None) or getattr(obj, "img_id", None)
+            box = canvas.bbox(target) if target is not None else None
+            if box and (box[1] < top or box[3] > bottom):
+                obj.hide()
 
     # ================================================= вкладка 2: STT =======
     stt_sec = label(u"РАСПОЗНАВАНИЕ РЕЧИ", SECTION)
@@ -2329,7 +2732,8 @@ def run_settings_window():
         result_txt["stt"].place(x0 + stt_test.nat_w + 16, y + H / 2.0, width=cw - stt_test.nat_w - 16)
 
     # ============================================== вкладка 3: Погружение ===
-    chars_path = os.path.join(BASE_DIR, "es_characters.json")
+    chars_path = os.path.join(config_loader.user_data_dir() if hasattr(config_loader, "user_data_dir")
+                              else BASE_DIR, "es_characters.json")
     try:
         with open(chars_path, encoding="utf-8") as f:
             prompt_data = json.load(f)
@@ -2339,11 +2743,34 @@ def run_settings_window():
     prompt_targets = [(c["id"], c["name"], False) for c in prompt_data.get("characters", [])]
     prompt_targets.append(("player",
                            (prompt_data.get("player") or {}).get("name", u"Семён"), True))
+    voice_targets = [(c["id"], c["name"]) for c in prompt_data.get("characters", [])]
+    load_character_voice()
     prompt_idx = [0]
+
+    auto_primary_on = [cfg.get("scene_auto_primary") is True]
+    activity_on = [cfg.get("npc_activity_enabled", True) is True]
+
+    def toggle_activity():
+        activity_on[0] = not activity_on[0]
+        activity_sw.set_on(activity_on[0])
+        layout()
+
+    activity_sw = CanvasSwitch(activity_on[0], toggle_activity)
+    activity_lbl = Txt(u"Занятость персонажей", F, CREAM)
+
+    def toggle_auto_primary():
+        auto_primary_on[0] = not auto_primary_on[0]
+        auto_primary_sw.set_on(auto_primary_on[0])
+        layout()
+
+    auto_primary_sw = CanvasSwitch(auto_primary_on[0], toggle_auto_primary)
+    auto_primary_lbl = Txt(u"Автоматически менять собеседника", F, CREAM)
 
     clock_initial = cfg.get("game_clock")
     clock_initial = clock_initial if isinstance(clock_initial, dict) else {}
     clock_on = [clock_initial.get("enabled") is True]
+    clock_show_time = [clock_initial.get("show_time", True)
+                       if type(clock_initial.get("show_time", True)) is bool else True]
     clock_time_var = tk.StringVar(value=clock_initial.get("start_time", "08:00"))
     clock_step_var = tk.StringVar(value=str(clock_initial.get("minutes_per_exchange", 5)))
 
@@ -2378,7 +2805,7 @@ def run_settings_window():
             revision = previous.get("revision", 0)
             if type(revision) is not int or revision < 0:
                 revision = 0
-            return dict(enabled=bool(clock_on[0]), start_time=start,
+            return dict(enabled=bool(clock_on[0]), show_time=bool(clock_show_time[0]), start_time=start,
                         minutes_per_exchange=int(step), revision=revision + int(reset))
         except Exception as e:
             set_status(str(e), False)
@@ -2394,35 +2821,24 @@ def run_settings_window():
         if value is not None:
             clock_step_var.set(str(min(120, max(0, value["minutes_per_exchange"] + delta))))
 
-    def apply_clock():
-        try:
-            current = clock_read_config()
-            clock = clock_values(reset=True, current=current)
-            if clock is None:
-                return False
-            current["game_clock"] = clock
-            with open(clock_config_path(), "w", encoding="utf-8") as f:
-                json.dump(current, f, ensure_ascii=False, indent=2)
-            cfg["game_clock"] = clock
-        except Exception as e:
-            set_status(tr(u"Не удалось установить время: %s") % tr(str(e)), False)
-            return False
-        try:
-            _post("/reload")
-            set_status(u"Время установлено, сервер перечитал конфиг", True)
-        except Exception:
-            set_status(u"Время сохранено (сервер не ответил)", False)
-        return True
+    def toggle_clock_show_time():
+        clock_show_time[0] = not clock_show_time[0]
+        clock_show_sw.set_on(clock_show_time[0])
+        layout()
 
     clock_sw = CanvasSwitch(clock_on[0], toggle_clock)
     clock_lbl = Txt(u"Игровые часы", F, CREAM)
+    clock_show_sw = CanvasSwitch(clock_show_time[0], toggle_clock_show_time)
+    clock_show_lbl = Txt(u"Показывать время", F, CREAM)
     clock_time_l = label(u"НАЧАЛО (ЧЧ:ММ)")
     clock_time_f = field(clock_time_var)
     clock_step_l = label(u"МИНУТ ЗА РЕПЛИКУ (0-120)")
     clock_step_f = field(clock_step_var)
     clock_minus = Chip(u"-", lambda: clock_step(-1))
     clock_plus = Chip(u"+", lambda: clock_step(1))
-    clock_apply = Chip(u"Установить время", apply_clock, font=FB)
+    # Кнопка «Установить время» убрана: дублировала «Сохранить». Сброс/установка
+    # времени теперь — через «Сохранить»: revision бампится автоматически, когда
+    # тумблер/время/шаг изменились относительно on-disk конфига.
 
     story_initial = cfg.get("story_events")
     story_initial = story_initial if isinstance(story_initial, dict) else {}
@@ -2450,21 +2866,18 @@ def run_settings_window():
     select_story_intensity(story_intensity[0])
     story_note = Txt(u"Небольшие истории по контексту. Можно отказаться; без обязательных переходов.",
                      FS, HINT, anchor="nw")
-    story_save_note = Txt(u"Применить: «Сохранить и применить» внизу окна.", FS, HINT, anchor="nw")
 
     def lay_story(x0, x1, y):
         story_sw.place(x0, y + 4)
         story_lbl.place(x0 + story_sw.w + 12, y + 4 + story_sw.h / 2.0)
         if not story_on[0]:
-            for obj in [chip for _, chip in story_chips] + [story_note, story_save_note]:
+            for obj in [chip for _, chip in story_chips] + [story_note]:
                 obj.hide()
             return y + story_sw.h + 16
         y = flow([chip for _, chip in story_chips], x0, y + story_sw.h + 16, x1 - x0) + 12
-        for note in (story_note, story_save_note):
-            note.place(x0, y, width=x1 - x0)
-            box = note.bbox()
-            y += (box[3] - box[1] if box else 32) + 8
-        return y + 8
+        story_note.place(x0, y, width=x1 - x0)
+        box = story_note.bbox()
+        return y + (box[3] - box[1] if box else 32) + 16
 
     def lay_clock(x0, x1, y):
         clock_sw.place(x0, y + LBL + 4)
@@ -2472,9 +2885,13 @@ def run_settings_window():
         y += ROW
         if not clock_on[0]:
             for obj in (clock_time_l, clock_time_f, clock_step_l, clock_minus,
-                        clock_step_f, clock_plus, clock_apply):
+                        clock_step_f, clock_plus, clock_show_sw, clock_show_lbl):
                 obj.hide()
             return y
+        indent = x0 + clock_sw.w + 8
+        clock_show_sw.place(indent, y + 4)
+        clock_show_lbl.place(indent + clock_show_sw.w + 8, y + 4 + clock_show_sw.h / 2.0)
+        y += clock_show_sw.h + 16
         clock_time_l.place(x0, y + 8)
         clock_time_f.place(x0, y + LBL, 110, H)
         sx = x0 + 140
@@ -2482,9 +2899,7 @@ def run_settings_window():
         clock_minus.place(sx, y + LBL)
         clock_step_f.place(sx + clock_minus.nat_w + 6, y + LBL, 64, H)
         clock_plus.place(sx + clock_minus.nat_w + 76, y + LBL)
-        y += ROW
-        clock_apply.place(x0, y)
-        return y + H + 16
+        return y + ROW
 
     pr_sec = label(u"ПЕРСОНАЖИ", SECTION)
     pr_chips = []
@@ -2508,14 +2923,8 @@ def run_settings_window():
     pr_save = Chip(u"Сохранить промпт", lambda: prompt_save(), font=FB, padx=22)
     result_txt["prompt"] = Txt(u"", FS, HINT)
 
-    def mark_player_prompt_dirty(*_args):
-        """Make unsaved player-name edits visible on the prompt save control."""
-        if prompt_idx[0] < len(prompt_targets) and prompt_targets[prompt_idx[0]][2]:
-            pr_save.set_selected(True)
-
-    player_name_var.trace_add("write", mark_player_prompt_dirty)
-    persona_text.bind("<<Modified>>", lambda _event: (mark_player_prompt_dirty(),
-        persona_text.edit_modified(False)))
+    player_name_var.trace_add("write", schedule_save_state)
+    persona_text.bind("<<Modified>>", persona_modified)
 
     def prompt_select(idx):
         prompt_idx[0] = idx
@@ -2526,36 +2935,21 @@ def run_settings_window():
         persona_text.delete("1.0", "end")
         if is_player:
             pd = prompt_data.get("player") or {}
-            player_name_var.set(pd.get("name", u"Семён"))
             persona_text.insert("1.0", pd.get("persona", ""))
         else:
             persona_text.insert("1.0", prompt_data["characters"][idx].get("persona", ""))
         persona_text.edit_reset()
         persona_text.edit_modified(False)
-        if "pr_save" in globals():
-            pr_save.set_selected(False)
+        pr_save.set_selected(False)
+        schedule_save_state()
         show_result("prompt", u"")
         layout()
 
     def prompt_save():
-        tid, name, is_player = prompt_targets[prompt_idx[0]]
         try:
-            if is_player:
-                prompt_data["player"] = {"id": "player",
-                                         "name": player_name_var.get().strip() or u"Семён",
-                                         "persona": persona_text.get("1.0", "end").strip()}
-            else:
-                for c in prompt_data["characters"]:
-                    if c["id"] == tid:
-                        c["persona"] = persona_text.get("1.0", "end").strip()
-            with open(chars_path, "w", encoding="utf-8") as f:
-                json.dump(prompt_data, f, ensure_ascii=False, indent=2)
-            if is_player:
-                prompt_targets[prompt_idx[0]] = (tid, prompt_data["player"]["name"], True)
-                pr_chips[prompt_idx[0]].retranslate()
-                persona_who.retranslate()
-            if "pr_save" in globals():
-                pr_save.set_selected(False)
+            save_current_prompt()
+            pr_save.set_selected(False)
+            refresh_save_state()
             try:
                 _post("/reload")
                 show_result("prompt", u"✓ Сохранено, сервер перечитал персонажей")
@@ -2669,6 +3063,19 @@ def run_settings_window():
                 self.command("moveto", fraction * (1 - (self.last - self.first)))
 
     immersion_bar = ImmersionScrollbar()
+    tts_scroll = [0, 0, 1]
+    tts_bar = ImmersionScrollbar()
+
+    def scroll_tts(action, value, units=None):
+        close_lookup()
+        if action == "moveto":
+            offset = float(value) * (tts_scroll[1] + tts_scroll[2])
+        else:
+            offset = tts_scroll[0] + int(value) * (40 if units == "units" else tts_scroll[2])
+        tts_scroll[0] = min(tts_scroll[1], max(0, int(offset)))
+        layout()
+
+    tts_bar.config(command=scroll_tts)
 
     def scroll_immersion(action, value, units=None):
         if action == "moveto":
@@ -2681,6 +3088,12 @@ def run_settings_window():
     immersion_bar.config(command=scroll_immersion)
 
     def immersion_wheel(event):
+        if cur_tab[0] == 1 and (event.widget in (canvas, tts_bar) or
+                              event.widget in lookup_icons or
+                              any(event.widget is getattr(obj, "widget", None) for obj in MANAGED)):
+            if event.delta:
+                scroll_tts("scroll", -1 if event.delta > 0 else 1, "units")
+                return "break"
         if cur_tab[0] == 3 and event.widget in (canvas, immersion_bar):
             if not event.delta:
                 return
@@ -2698,6 +3111,12 @@ def run_settings_window():
         cw = x1 - x0
         y = lay_clock(x0, x1, y)
         y = lay_story(x0, x1, y)
+        auto_primary_sw.place(x0, y + 4)
+        auto_primary_lbl.place(x0 + auto_primary_sw.w + 12, y + 4 + auto_primary_sw.h / 2.0)
+        y += auto_primary_sw.h + 16
+        activity_sw.place(x0, y + 4)
+        activity_lbl.place(x0 + activity_sw.w + 12, y + 4 + activity_sw.h / 2.0)
+        y += activity_sw.h + 16
         cameo_sw.place(x0, y + 4)
         cameo_lbl.place(x0 + cameo_sw.w + 12, y + 4 + cameo_sw.h / 2.0)
         y += cameo_sw.h + 16
@@ -2893,17 +3312,82 @@ def run_settings_window():
         hist_forget.place(x0 + hist_compress.nat_w + hist_save.nat_w + 16, btn_y)
 
     # ------------------------------------------------------------ подвал ---
+    def transfer_directory():
+        return (config_loader.user_data_dir() if hasattr(config_loader, "user_data_dir")
+                else BASE_DIR)
+
+    def open_config_folder():
+        directory = (config_loader.user_data_dir() if hasattr(config_loader, "user_data_dir")
+                     else os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                                       "AI.Sovenok"))
+        os.makedirs(directory, exist_ok=True)
+        os.startfile(directory)
+
+    def export_user_data():
+        from tkinter import filedialog, messagebox
+        include_keys = messagebox.askyesno(tr(u"Экспорт"), tr(
+            u"Экспорт содержит ключи API только с вашего согласия. Включить ключи?\n\n"
+            u"ZIP не зашифрован. Не публикуйте архив с ключами. «Нет» экспортирует без keys.json."),
+            parent=root, default="no")
+        try:
+            files = user_data_transfer.export_files(transfer_directory(), include_keys)
+            if not messagebox.askokcancel(tr(u"Экспорт"), tr(
+                    u"Будут экспортированы сохранённые файлы (несохранённые изменения не включены):\n%s")
+                    % "\n".join(sorted(files)), parent=root):
+                return
+            destination = filedialog.asksaveasfilename(parent=root, title=tr(u"Экспорт"),
+                defaultextension=".zip", filetypes=[("ZIP", "*.zip")], initialfile="AI.Sovenok.zip")
+            if not destination:
+                return
+            if os.path.normcase(os.path.abspath(destination)).startswith(
+                    os.path.normcase(os.path.abspath(transfer_directory())) + os.sep):
+                raise ValueError(tr(u"Сохраните архив вне папки пользовательских данных."))
+            user_data_transfer.write_archive(destination, files)
+            messagebox.showinfo(tr(u"Экспорт"), tr(u"Архив сохранён."), parent=root)
+        except Exception:
+            messagebox.showerror(tr(u"Экспорт"), tr(
+                u"Не удалось перенести данные. Проверьте архив, права доступа и допустимые размеры файлов."), parent=root)
+
+    def import_user_data():
+        from tkinter import filedialog, messagebox
+        source = filedialog.askopenfilename(parent=root, title=tr(u"Импорт"), filetypes=[("ZIP", "*.zip")])
+        if not source:
+            return
+        try:
+            files = user_data_transfer.read_archive(source)
+            notice = tr(u"Будут заменены только перечисленные файлы; остальные сохранятся. "
+                        u"Старые файлы попадут в import_backups.\n\n%s\n\n"
+                        u"Импорт закроет настройки и отменит несохранённые изменения. "
+                        u"Сначала остановите игру и сервер, затем перезапустите их после импорта. Продолжить?")
+            if "keys.json" in files:
+                notice += "\n\n" + tr(u"Архив содержит ключи API; текущие ключи будут заменены.")
+            if not messagebox.askyesno(tr(u"Импорт"), notice % "\n".join(sorted(files)),
+                                      parent=root, default="no"):
+                return
+            user_data_transfer.import_files(transfer_directory(), files)
+        except Exception:
+            messagebox.showerror(tr(u"Импорт"), tr(
+                u"Не удалось перенести данные. Проверьте архив, права доступа и допустимые размеры файлов."), parent=root)
+            return
+        try:
+            config_loader.reload_all()
+            _post("/reload")
+        except Exception:
+            pass
+        try:
+            messagebox.showinfo(tr(u"Импорт"), tr(
+                u"Данные импортированы. Перезапустите игру и сервер, затем откройте настройки заново."), parent=root)
+        finally:
+            root.destroy()
+
     b_hist = Chip(u"Очистить историю", clear_history, h=36, managed=False)
     b_reset = Chip(u"Сбросить всё", reset_all, h=36, managed=False)
-    b_folder = Chip(u"Папка конфигов", lambda: os.startfile(BASE_DIR), h=36, managed=False)  # noqa
+    b_folder = Chip(u"Конфиги", open_config_folder, h=36, managed=False)
+    b_export = Chip(u"Экспорт", export_user_data, h=36, managed=False)
+    b_import = Chip(u"Импорт", import_user_data, h=36, managed=False)
     b_deps = Chip(u"Установить компоненты", install_deps, h=36, managed=False)
     b_save = Chip(u"Сохранить и применить", lambda: save_all(), kind="primary", font=FB,
                   h=36, padx=26, managed=False)
-    FOOT_LABELS = [  # от полных к коротким — берём первый вариант, что влезает
-        (u"Очистить историю", u"Сбросить всё", u"Папка конфигов", u"Установить компоненты"),
-        (u"Очистить историю", u"Сбросить всё", u"Конфиги", u"Компоненты"),
-        (u"История ✕", u"Сброс", u"Конфиги", u"Компоненты"),
-    ]
 
     # ------------------------------------------------------------ layout ---
     bg_state = {"size": (0, 0), "after": None, "photo": None, "item": None}
@@ -2981,7 +3465,7 @@ def run_settings_window():
                 r = 7
                 canvas.coords(map_dot, cx - r, cy - r, cx + r, cy + r)
                 lname = map_state.get("loc_name") or u""
-                canvas.itemconfig(map_lbl, text=(tr(u"Вы здесь") + (u": " + lname if lname else u"")),
+                canvas.itemconfig(map_lbl, text=(tr(u"Вы здесь") + (u": " + tr(lname) if lname else u"")),
                                   state="normal")
                 canvas.coords(map_lbl, cx, cy - r - 11)
                 bb = canvas.bbox(map_lbl)
@@ -3064,27 +3548,32 @@ def run_settings_window():
         # подвал
         by = h - 24 - 36
         avail = x1 - x0
-        for labels in FOOT_LABELS:
-            for b, t in zip((b_hist, b_reset, b_folder, b_deps), labels):
-                b.set_text(t)
-            need = sum(b.nat_w for b in (b_hist, b_reset, b_folder, b_deps, b_save)) + 8 * 3 + 28
-            if need <= avail:
-                break
-        b_hist.place(x0, by)
-        b_reset.place(x0 + b_hist.nat_w + 8, by)
-        b_folder.place(x0 + b_hist.nat_w + 8 + b_reset.nat_w + 8, by)
+        b_deps.set_text(u"Компоненты")
+        lower = (b_folder, b_export, b_import, b_deps, b_save)
+        need = sum(b.nat_w for b in lower) + 8 * 4
+        # A third row is reserved if translated labels cannot fit at minimum width.
+        split_footer = need > avail
+        upper_y = by - (88 if split_footer else 44)
+        b_hist.place(x0, upper_y)
+        b_reset.place(x0 + b_hist.nat_w + 8, upper_y)
+        transfer_y = by - 44 if split_footer else by
+        b_folder.place(x0, transfer_y)
+        b_export.place(x0 + b_folder.nat_w + 8, transfer_y)
+        b_import.place(x0 + b_folder.nat_w + b_export.nat_w + 16, transfer_y)
         b_save.place(x1 - b_save.nat_w, by)
         b_deps.place(x1 - b_save.nat_w - 8 - b_deps.nat_w, by)
 
         # содержимое вкладки
         immersion_bar.place_forget()
-        LAYOUTS[cur_tab[0]](x0, x1, ty + 58, by - 18)
+        tts_bar.place_forget()
+        LAYOUTS[cur_tab[0]](x0, x1, ty + 58, upper_y - 18)
         for o in MANAGED:
             if o._pass != PASS[0] and o.visible:
                 o.hide()
         position_models()
         if bg_state["size"] != (w, h):
             schedule_bg(w, h)
+        refresh_save_state()
 
     def on_configure(event):
         if event.widget is canvas:
@@ -3111,6 +3600,21 @@ def run_settings_window():
     render_bg(WIN_W, WIN_H)
     if prompt_targets:
         prompt_select(0)
+    # Track persisted inputs only, not selectors or display-only variables.
+    native_vars[:] = [llm_provider_var, url_var, model_var, max_tokens_var,
+                      temperature_var, tts_var, custom_tts_var, fish_voice_var,
+                      fish_voice_m_var, fish_model_var, el_voice_var, el_voice_m_var,
+                      el_model_var, oa_model_var, oa_voice_var, oa_voice_m_var,
+                      edge_f_var, edge_m_var, sapi_voice_var, sapi_voice_m_var,
+                      cu_model_var, cu_voice_f_var, cu_voice_m_var, stt_var,
+                      clock_time_var, clock_step_var, cameo_freq_var,
+                      cameo_lines_var, cameo_interject_var, cameo_ctx_var]
+    native_vars.extend(key_vars.values())
+    for var in native_vars:
+        var.trace_add("write", schedule_save_state)
+    saved_state[0] = settings_snapshot()
+    root.bind("<KeyRelease>", schedule_save_state, add=True)
+    root.bind("<ButtonRelease>", schedule_save_state, add=True)
     layout()
     poll_queue()
     refresh_server_status()

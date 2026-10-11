@@ -4,7 +4,7 @@
   "cameo_enabled": true,
   "llm": {
     "_hint": "api.openai.com из РФ недоступен. Рабочие варианты: Groq (быстрый, бесплатный тариф), OpenRouter (много моделей, есть бесплатные), Ollama/LM Studio (локально, без ключа).",
-    "api_url": "https://api.groq.com/openai/v1/chat/completions",
+    "api_url": "https://api.groq.com/openai/v1",
     "model": "llama-3.3-70b-versatile",
     "max_tokens": 400,
     "temperature": 0.9,
@@ -19,7 +19,7 @@
     "edge_tts_format": "mp3",
     "custom_tts_url": "",
     "fish_model": "s2.1-pro-free",
-    "fish_reference_id": "6dc11f3f67a543f6ad4537a4a347e224",
+    "fish_reference_id": "",
     "edge_voice": "ru-RU-SvetlanaNeural",
     "edge_voice_female": "ru-RU-SvetlanaNeural",
     "edge_voice_male": "ru-RU-DmitryNeural",

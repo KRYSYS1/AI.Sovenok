@@ -5,7 +5,6 @@
 Если сервер ещё не запущен — поднимет его сам (без консоли), затем откроет
 нативное окно настроек.
 """
-import json
 import os
 import subprocess
 import sys
@@ -15,12 +14,15 @@ import urllib.request
 DIR = os.path.dirname(os.path.abspath(__file__))
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 DETACHED = 0x00000008 if os.name == "nt" else 0
+sys.path.insert(0, DIR)
+from config_loader import cfg
 
 
 def read_port():
     try:
-        with open(os.path.join(DIR, "config.json"), "r", encoding="utf-8") as f:
-            port = int(json.load(f).get("port", 40310))
+        port = int(cfg.get("port", 40310))
+        if not 1 <= port <= 65535:
+            return 40310
     except Exception:
         return 40310
     # старые дефолты сервер при старте мигрирует на 40310 (main.migrate_port)

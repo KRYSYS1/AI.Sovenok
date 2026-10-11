@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "development_only": ["server/test_paths.py", "server/delivery_py2_check.py", "server/test_*.py"],
+  "flavor": "workshop",
+  "server": [
+    "characters_store.py", "es_characters.json", "config_loader.py", "conversation.py", "llm_client.py",
+    "main.py", "npc_activity.py", "scene_memory.py", "selected_companions.py",
+    "settings_window.py", "settings.pyw", "start_server.pyw", "story_events.py",
+    "stt_client.py", "tts_client.py", "ui_i18n.py", "user_data_transfer.py"
+  ],
+  "client": [
+    "es_ai.rpy", "es_ai_activity.rpy", "es_ai_api.rpy", "es_ai_cameo.rpy",
+    "es_ai_chat.rpy", "es_ai_delivery.rpy", "es_ai_gate.rpy", "es_ai_locations.rpy",
+    "es_ai_map.rpy", "es_ai_overlay.rpy", "es_ai_screens.rpy"
+  ],
+  "assets": [
+    "server/ui/bg_settings.jpg",
+    "server/ui/gothic.ttf", "gate/gate_idle.png", "gate/gate_hover.png", "gate/sov.mp3",
+    "es_ai_map_bg.b64.part0", "es_ai_map_bg.b64.part1", "es_ai_map_bg.b64.part2",
+    "es_ai_map_bg.b64.part3"
+  ],
+  "static_defaults": {
+    "host": "127.0.0.1", "port": 40310, "cameo_enabled": true,
+    "llm": {
+      "api_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile",
+      "max_tokens": 400, "temperature": 0.9, "request_timeout": 90, "provider": "groq"
+    },
+    "tts": {
+      "provider": "auto", "cache_dir": "cache_tts", "elevenlabs_model": "eleven_multilingual_v2",
+      "elevenlabs_default_voice": "EXAVITQu4vr4xnSDxMaL", "openai_tts_model": "tts-1",
+      "edge_tts_format": "mp3", "custom_tts_url": "", "fish_model": "s2.1-pro-free",
+      "fish_reference_id": "", "edge_voice": "ru-RU-SvetlanaNeural",
+      "edge_voice_female": "ru-RU-SvetlanaNeural", "edge_voice_male": "ru-RU-DmitryNeural",
+      "narrator_voice": {"edge": "ru-RU-SvetlanaNeural", "elevenlabs": "EXAVITQu4vr4xnSDxMaL", "openai": "nova", "fish": ""},
+      "fish_voice_female": "", "fish_voice_male": "", "elevenlabs_voice_female": "EXAVITQu4vr4xnSDxMaL",
+      "elevenlabs_voice_male": "", "openai_voice_female": "nova", "openai_voice_male": "onyx",
+      "openai_default_voice": "nova", "sapi_voice_female": "", "sapi_voice_male": "", "sapi_voice": "",
+      "custom_tts_model": "tts-1", "custom_voice_female": "nova", "custom_voice_male": "onyx"
+    },
+    "stt": {"provider": "auto", "max_record_seconds": 8, "silence_stop_seconds": 1.2,
+      "whisper_model": "whisper-1", "groq_whisper_model": "whisper-large-v3-turbo", "language": "ru"},
+    "history": {"max_messages": 16, "keep_recent": 6, "compress_threshold": 16},
+    "novel": {"max_context_lines": 24, "reply_max_sentences": 4},
+    "ui_lang": "ru", "cameo_freq": 25, "cameo_stay": true, "cameo_stay_lines": 2,
+    "cameo_interject": 35, "cameo_ctx": 70, "cameo_max_extra": 2
+  },
+  "optional_imports": ["PIL", "edge_tts", "pyttsx3", "sounddevice", "numpy", "faster_whisper"],
+  "flavor_sensitive": [
+    "server/config_loader.py", "server/main.py", "server/tts_client.py",
+    "server/conversation.py", "server/characters_store.py", "server/settings.pyw",
+    "server/settings_window.py", "es_ai.rpy", "es_ai_api.rpy", "es_ai_cameo.rpy"
+  ]
+}

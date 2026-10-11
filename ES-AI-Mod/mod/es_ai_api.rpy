@@ -40,12 +40,42 @@ init 10 python:
 
     # ---------------------------------------------------------- запросы ----
 
+    ES_AI_STORY_ACKS = []
+
+    def es_ai_story_ack_record(ack):
+        import time
+        if not isinstance(ack, _es_ai_cameo_builtins.dict):
+            return
+        token, delivery = ack.get("token"), ack.get("delivery_id")
+        if not isinstance(token, basestring) or not isinstance(delivery, basestring):
+            return
+        if len(token) != 36 or len(delivery) != 36:
+            return
+        value = dict(token=token, delivery_id=delivery)
+        if not any(item[1] == value for item in ES_AI_STORY_ACKS):
+            ES_AI_STORY_ACKS.append((time.time(), value))
+        ES_AI_STORY_ACKS[:] = ES_AI_STORY_ACKS[-30:]
+
+    def es_ai_story_ack_snapshot():
+        import time
+        now = time.time()
+        ES_AI_STORY_ACKS[:] = [item for item in ES_AI_STORY_ACKS if 0 <= now - item[0] < 900]
+        return [dict(item[1]) for item in ES_AI_STORY_ACKS]
+
     def es_ai_chat_async(char_id, text, novel_context=None, speaker=""):
+        if "es_ai_delivery_flush" in globals():
+            es_ai_delivery_flush()
+        request_trace = es_ai_request_trace(char_id, text)
+        es_ai_log("live-chain-20261011 request %r" % request_trace)
         clock_token = es_ai_clock_begin(redraw=es_ai_chat_active[0])
+        if ES_AI_FREE_SCENE[0]:
+            es_ai_public_record("player", text)
         payload = {"character": char_id, "text": text,
                    "novel_context": novel_context or [], "speaker": speaker,
                    "clock": es_ai_clock_snapshot()}
-        if es_ai_chat_active[0]:
+        payload["public_events"] = es_ai_public_snapshot()
+        payload["story_acks"] = es_ai_story_ack_snapshot()
+        if ES_AI_FREE_SCENE[0]:
             payload["location"] = es_ai_location_context()
             payload["scene"] = es_ai_scene_snapshot(char_id)
 
@@ -54,6 +84,7 @@ init 10 python:
             if not r.get("ok"):
                 raise Exception(r.get("error", "неизвестная ошибка сервера"))
             r["_clock_revision"] = clock_token
+            r["_request_trace"] = request_trace
             return r
 
         return es_ai_run_async("chat", fn)
@@ -80,10 +111,14 @@ init 10 python:
             pass
 
     def es_ai_initiative_async(char_id, novel_context=None):
+        if "es_ai_delivery_flush" in globals():
+            es_ai_delivery_flush()
         clock_token = es_ai_clock_begin(redraw=es_ai_chat_active[0])
         payload = {"character": char_id, "novel_context": novel_context or [],
                    "clock": es_ai_clock_snapshot()}
-        if es_ai_chat_active[0]:
+        payload["public_events"] = es_ai_public_snapshot()
+        payload["story_acks"] = es_ai_story_ack_snapshot()
+        if ES_AI_FREE_SCENE[0]:
             payload["location"] = es_ai_location_context()
             payload["scene"] = es_ai_scene_snapshot(char_id)
 
@@ -230,12 +265,15 @@ init 10 python:
     es_ai_novel_context = []   # [{"who": ..., "what": ...}] — последние реплики романа
 
     def es_ai_push_context(who, what):
+        if not isinstance(what, basestring) or (who is not None and not isinstance(who, basestring)):
+            return
         es_ai_novel_context.append({"who": who or "", "what": what or ""})
         if len(es_ai_novel_context) > 30:
             del es_ai_novel_context[:len(es_ai_novel_context) - 30]
 
     def es_ai_context_snapshot():
-        return list(es_ai_novel_context)
+        return [item for item in es_ai_novel_context
+                if isinstance(item.get("what"), basestring) and isinstance(item.get("who"), basestring)]
 
     # ------------------------------------------------- озвучка романа ------
 
@@ -455,8 +493,7 @@ init 10 python:
         safe = es_ai_sanitize_text(raw)
         es_ai_internal_speaking[0] = True
         try:
-            es_ai_speakers[char_id](safe)
-            ES_AI_CLOCK["lines"] += 1
+            es_ai_delivery_say(es_ai_speakers[char_id], safe, char_id, raw)
         finally:
             es_ai_internal_speaking[0] = False
 

@@ -1,4 +1,5 @@
 """Offline Python 2/3 regressions for JSON crossing the Ren'Py store boundary."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import io
 import json
@@ -14,10 +15,7 @@ except ImportError:
     import builtins
 
 
-ROOTS = (
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mod"),
-    r"D:\Program Files (x86)\Steam\steamapps\workshop\content\331470\3809240310",
-)
+from test_paths import ROOTS
 
 
 class RevertableDict(dict):
@@ -77,8 +75,9 @@ class JsonContainerTests(unittest.TestCase):
                "_es_random": random.Random(42), "ES_AI_SERVER_DIR": root,
                "ES_AI_CHARS": [(c, c, "") for c in ("un", "dv", "us", "sh")],
                "ES_AI_SHOWN": RevertableList([{"id": "un"}]),
-               "ES_AI_LOC_CUR": ["square"], "ES_AI_LOC_LAST_CHAR": ["un"],
-               "ES_AI_CLOCK": dict(enabled=False, lines=0),
+               "ES_AI_LOC_CUR": ["square"], "ES_AI_LOC_LAST_CHAR": ["un"], "ES_AI_CAMEO_PLAYER_TEXT": [""],
+                "ES_AI_CLOCK": dict(enabled=False, lines=0),
+                "ES_AI_TIME": ["day"],
                "ES_AI_LOC_LAST_EMO": [None], "ES_AI_CAMEO_CD": [0],
                "ES_AI_CAMEO_COOLDOWN": 5, "ES_AI_ROMANCEABLE": [],
                "es_ai_recent_push": lambda *a: None, "es_ai_recent_snapshot": lambda n: [],
@@ -103,13 +102,14 @@ class JsonContainerTests(unittest.TestCase):
         code = extract(root, "es_ai_cameo.rpy", {
             "es_ai_read_cameo_settings", "es_ai_read_cameo_flag", "es_ai_cameo_on",
             "es_ai_write_cameo_setting", "es_ai_scene_snapshot", "es_ai_try_cameo",
-            "es_ai_cameo_enter", "es_ai_cameo_dress", "es_ai_cameo_register", "es_ai_cameo_leave",
+            "es_ai_cameo_enter", "es_ai_cameo_home_reason", "es_ai_cameo_dress", "es_ai_cameo_clothing_request", "es_ai_cameo_register", "es_ai_cameo_leave",
             "es_ai_cameo_unregister", "es_ai_cameo_take_nearby", "es_ai_cameo_capacity", "es_ai_cameo_group_size",
             "es_ai_cameo_deliver_group"}, {"ES_AI_CAMEO_DEFAULTS", "ES_AI_CAMEO_BY_LOC",
-                                      "ES_AI_CAMEO_ACTIVE", "ES_AI_CAMEO_NEARBY"})
+                                      "ES_AI_CAMEO_ACTIVE", "ES_AI_CAMEO_NEARBY",
+                                      "ES_AI_CAMEO_HOMES", "ES_AI_CAMEO_CHANGING_ADULT_AGES"})
         exec(code, env)
         env["ES_AI_LOCATION_INDEX"] = dict.fromkeys(list(env["ES_AI_CAMEO_BY_LOC"]) + ["bus_stop"], {})
-        exec(extract(root, "es_ai_locations.rpy", {"es_ai_apply_actions"}), env)
+        exec(extract(root, "es_ai_locations.rpy", {"es_ai_apply_actions", "es_ai_default_dress", "es_ai_clothing_night", "es_ai_no_swimming", "es_ai_beach_romantic_clothing"}), env)
         # Redirect every config read/write to memory, including workshop user config.
         env["es_ai_user_config_path"] = lambda: os.path.join(root, "config.json")
         self.config = {"cameo_enabled": True, "cameo_stay": True,
@@ -196,7 +196,9 @@ class JsonContainerTests(unittest.TestCase):
         self.check(ROOTS[0])
 
     def test_workshop(self):
-        self.check(ROOTS[1])
+        if not os.path.isdir(WORKSHOP_ROOT):
+            self.skipTest("Workshop installation unavailable")
+        self.check(WORKSHOP_ROOT)
 
 
 if __name__ == "__main__":

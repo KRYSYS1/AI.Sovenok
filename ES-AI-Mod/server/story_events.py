@@ -6,9 +6,12 @@ import os
 import re
 import tempfile
 import threading
+import time
+import uuid
 
 STATUSES = {"inactive", "offered", "active", "completed", "declined"}
 LIMIT = 2048
+DIRECT_TTL = 7 * 24 * 3600
 _TAG = re.compile(r"\[\s*(?:story\s*:|action\s*:\s*story\s*:)", re.I)
 
 
@@ -31,12 +34,23 @@ def clean(value, limit):
     return re.sub(r"[\x00-\x1f\x7f<>\[\]{}]", " ", value[:limit]).strip()
 
 
-def player_decision(text):
+def player_decision(text, state=None, model_active=False):
     """Recognize only direct, unambiguous decisions about the pending offer."""
     if not isinstance(text, str) or len(text) > 1000:
         return "unknown"
     text = text.lower().replace("\u2019", "'").replace("\u0451", "\u0435")
+    text = re.sub(r"^(?:(?:slavya|lena|alisa|miku|olga(?: dmitrievna)?|elektronik|shurik|zhenya|viola|ulyana|\u0441\u043b\u0430\u0432\u044f|\u043b\u0435\u043d\u0430|\u0430\u043b\u0438\u0441\u0430|\u043c\u0438\u043a\u0443|\u043e\u043b\u044c\u0433\u0430(?: \u0434\u043c\u0438\u0442\u0440\u0438\u0435\u0432\u043d\u0430)?|\u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u0438\u043a|\u0448\u0443\u0440\u0438\u043a|\u0436\u0435\u043d\u044f|\u0432\u0438\u043e\u043b\u0430|\u0443\u043b\u044c\u044f\u043d\u0430)\s*[,!:]\s*)+", "", text)
     text = " ".join(re.sub(r"[,.!;:\s]+", " ", text).split())
+    abandonment = (
+        r"(?:\u043d\u0435 \u0445\u043e\u0447\u0443 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0442\u044c \u044d\u0442\u0443 \u0438\u0441\u0442\u043e\u0440\u0438\u044e|"
+        r"\u0434\u0430\u0432\u0430\u0439 \u043f\u0440\u0435\u043a\u0440\u0430\u0442\u0438\u043c \u043f\u043e\u0438\u0441\u043a\u0438|\u043e\u0441\u0442\u0430\u0432\u0438\u043c \u044d\u0442\u0443 \u0437\u0430\u0442\u0435\u044e|"
+        r"stop this story|let's stop (?:this story|the search)|"
+        r"i (?:don't|do not) want to (?:continue this story|do this))"
+    )
+    if re.fullmatch(abandonment, text):
+        return "declined"
+    if state and state.get("status") == "active":
+        return "unknown"  # Ordinary yes/no answers do not restart or abandon a story.
     refusal = (
         r"(?:\u043d\u0435\u0442(?: \u043d\u0435 \u0445\u043e\u0447\u0443)?|"
         r"(?:\u044f )?\u043d\u0435 \u0445\u043e\u0447\u0443 (?:\u0443\u0447\u0430\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c|\u044d\u0442\u0438\u043c \u0437\u0430\u043d\u0438\u043c\u0430\u0442\u044c\u0441\u044f)|"
@@ -51,7 +65,36 @@ def player_decision(text):
         r"(?:\u0434\u0430 )?\u044f \u043f\u043e\u043c\u043e\u0433\u0443|yes|let's do it|(?:yes )?i(?: will|'ll) help|"
         r"(?:\u0434\u0430\u0432\u0430\u0439 |\u043f\u043e\u0439\u0434\u0435\u043c )\u0438\u0441\u043a\u0430\u0442\u044c (?:\u0437\u0430\u043f\u0438\u0441\u043a\u0443|\u0431\u043b\u043e\u043a\u043d\u043e\u0442|\u0442\u0435\u0442\u0440\u0430\u0434\u044c))"
     )
-    return "accepted" if re.fullmatch(acceptance, text) else "unknown"
+    if re.fullmatch(acceptance, text):
+        # A specific search command must refer to this offer, not another task.
+        if not state or not re.search(r"\u0438\u0441\u043a\u0430\u0442\u044c", text):
+            return "accepted"
+    if not state or re.search(r"[?\"\[\]{}]|\b(?:\u043d\u0435|\u043d\u0435\u0442|not|no|don't|if|maybe|but|\u0435\u0441\u043b\u0438|\u043c\u043e\u0436\u0435\u0442|\u043d\u043e)\b", text):
+        return "unknown"
+    purposeful = re.fullmatch(
+        r"(?:(?:\u043f\u043e\u0439\u0434\u0435\u043c|\u0434\u0430\u0432\u0430\u0439) (?:\u0438\u0441\u043a\u0430\u0442\u044c|\u043f\u043e\u043c\u043e\u0436\u0435\u043c) .+|"
+        r"\u044f \u0437\u0430\u0439\u043c\u0443\u0441\u044c \u043f\u043e\u0438\u0441\u043a\u043e\u043c|\u0433\u043e\u0442\u043e\u0432(?:\u0430)? \u043f\u043e\u043c\u043e\u0447\u044c|"
+        r"let's (?:go (?:look|search) for|find|help) .+|"
+        r"i (?:will|am going to) (?:search|look) for .+|i(?:'m| am) ready to help)", text)
+    if not purposeful:
+        return "unknown"
+    narrative = (state.get("title", "") + " " + state.get("summary", "")).lower().replace("\u0451", "\u0435")
+    # Small explicit alias groups, not fuzzy arbitrary word overlap or a language planner.
+    goals = (("\u0437\u0430\u043f\u0438\u0441\u043a", "note", "message"),
+             ("\u0431\u043b\u043e\u043a\u043d\u043e\u0442", "\u0442\u0435\u0442\u0440\u0430\u0434", "notebook"),
+             ("\u043f\u043e\u0438\u0441\u043a", "\u0438\u0441\u043a", "find", "search", "look"),
+             ("\u043f\u043e\u043c\u043e", "help"),
+             ("\u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u0438\u043a", "electronic", "elektronik"))
+    def has(words, value):
+        return any(re.search(r"\b" + re.escape(word) + (r"\b" if word.isascii() else r"\w*\b"), value) for word in words)
+    specific = goals[:2] + goals[4:]
+    named = [words for words in specific if has(words, text)]
+    if named:
+        matched = all(has(words, narrative) or
+                      (words == goals[4] and "el" in state.get("participants", [])) for words in named)
+    else:
+        matched = model_active and any(has(words, text) and has(words, narrative) for words in goals[2:4])
+    return "accepted" if matched else "unknown"
 
 
 def parse_tags(text):
@@ -126,6 +169,142 @@ class StoryManager:
         self.path = path
         self.lock = threading.RLock()
         self.state = None
+        self.pending_direct = {}
+        self._pending_loaded = False
+
+    def _pending_path(self):
+        self.path = self.path or default_path()
+        return os.path.join(os.path.dirname(self.path), "story_pending.json")
+
+    def _load_pending(self):
+        if self._pending_loaded:
+            return
+        path = self._pending_path()
+        try:
+            with open(path, encoding="utf-8") as stream:
+                data = json.loads(stream.read(16 * 1024 * 1024 + 1))
+            if not isinstance(data, dict) or data.get("schema") != 1:
+                raise ValueError("unsupported story pending version")
+            if isinstance(data, dict) and data.get("schema") == 1:
+                for key, event in list(data.get("events", {}).items())[:128]:
+                    if (not self._valid_id(key) or not isinstance(event, dict)
+                            or not isinstance(event.get("created_wall"), (int, float))
+                            or not isinstance(event.get("deliveries"), dict)):
+                        continue
+                    age = time.time() - event["created_wall"]
+                    if 0 <= age < DIRECT_TTL:
+                        event["created"] = time.monotonic() - age
+                        self.pending_direct[key] = event
+        except FileNotFoundError:
+            pass
+        self._pending_loaded = True
+
+    @staticmethod
+    def _valid_id(value):
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) is not None
+
+    def _save_pending(self):
+        path = self._pending_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".story-pending-", dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(dict(schema=1, events=self.pending_direct), stream, default=list)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _expire_direct(self):
+        self._load_pending()
+        now = time.monotonic()
+        self.pending_direct = {key: value for key, value in self.pending_direct.items()
+                               if 0 <= now - value['created'] < DIRECT_TTL}
+
+    def direct_request(self, token, player_text, ids, active):
+        if not token or token['readonly'] or not isinstance(player_text, str) or len(player_text) > 4000:
+            return None
+        ids = [cid for cid in ids if isinstance(cid, str) and cid in token['known'] and cid != active][:6]
+        if not ids:
+            return None
+        with self.lock:
+            self._expire_direct()
+            while len(self.pending_direct) >= 128:
+                del self.pending_direct[next(iter(self.pending_direct))]
+            key = str(uuid.uuid4())
+            self.pending_direct[key] = dict(token=copy.deepcopy(token), text=player_text,
+                ids=ids, active=active, created=time.monotonic(), created_wall=time.time(), deliveries={})
+            try:
+                self._save_pending()
+            except OSError:
+                del self.pending_direct[key]
+                return None
+            return key
+
+    def direct_context(self, key, cid, active, player_text):
+        with self.lock:
+            self._expire_direct()
+            event = self.pending_direct.get(key) if isinstance(key, str) else None
+            if not event or cid not in event['ids'] or active != event['active'] or player_text != event['text']:
+                return None
+            self._load()
+            if event['token']['version'] != self.state['version']:
+                return None
+            token = copy.deepcopy(event['token'])
+            token['active'] = cid
+            return token
+
+    def direct_delivery(self, key, cid, active, player_text, update, reply):
+        with self.lock:
+            token = self.direct_context(key, cid, active, player_text)
+            if not token or not isinstance(reply, str) or not reply.strip() or len(reply) > 16000:
+                return None
+            event = self.pending_direct[key]
+            if len(event['deliveries']) >= 8:
+                return None
+            delivery = str(uuid.uuid4())
+            if update is not None and len(json.dumps(update)) > LIMIT:
+                return None
+            event['deliveries'][delivery] = dict(token=token, update=copy.deepcopy(update), reply=reply[:600])
+            try:
+                self._save_pending()
+            except OSError:
+                del event['deliveries'][delivery]
+                return None
+            return dict(token=key, delivery_id=delivery)
+
+    def acknowledge_direct(self, acknowledgements):
+        if not isinstance(acknowledgements, list):
+            return []
+        accepted = []
+        with self.lock:
+            self._expire_direct()
+            for ack in acknowledgements[:30]:
+                if not isinstance(ack, dict):
+                    continue
+                key, delivery = ack.get('token'), ack.get('delivery_id')
+                if not self._valid_id(key) or not self._valid_id(delivery):
+                    continue
+                event = self.pending_direct.get(key)
+                candidate = event['deliveries'].get(delivery) if event else None
+                if not candidate:
+                    # Unknown IDs cannot mutate state; retire obsolete client retries.
+                    accepted.append(dict(token=key, delivery_id=delivery))
+                    continue
+                self._load()
+                if candidate['token']['version'] != self.state['version']:
+                    del self.pending_direct[key]
+                    accepted.append(dict(token=key, delivery_id=delivery))
+                    continue
+                if self.commit(candidate['token'], candidate['update'], candidate['reply'], player_text=event['text']):
+                    # Consuming the exchange removes every sibling delivery, including retries.
+                    del self.pending_direct[key]
+                    accepted.append(dict(token=key, delivery_id=delivery))
+            if accepted:
+                self._save_pending()
+        return accepted
 
     def _load(self):
         if self.state is not None:
@@ -177,7 +356,8 @@ class StoryManager:
             "current clock, location, roster and player actions. Never narrate player decisions, "
             "movement, acceptance or success. Never force goto/time/cameo or summon/move NPCs for a "
             "story. Participants are references only, not arrivals. Honor refusal immediately: "
-            "'\u043d\u0435\u0442', '\u043d\u0435 \u0445\u043e\u0447\u0443', 'no' or equivalent in context means declined, not persuasion. "
+            "Explicit refusal of the offer or abandonment of the active story means declined, not persuasion. "
+            "An ordinary no, question or objection to a location is not abandonment. "
             "Do not repeat or replace a declined story during the pause. One storyline only. "
             "Only advance offered->active after explicit player acceptance; active->completed only "
             "after actual player actions establish completion. Preserve the latest summary. "
@@ -203,12 +383,15 @@ class StoryManager:
             state = copy.deepcopy(self.state)
             fresh = token["version"] == state["version"]
             changed = False
-            if fresh and player_exchange and state["status"] == "offered":
-                decision = player_decision(player_text)
+            if fresh and player_exchange and state["status"] in ("offered", "active"):
+                model_active = isinstance(update, dict) and update.get("status") == "active"
+                decision = player_decision(player_text, state, model_active)
                 if decision == "declined":
                     # Player agency overrides missing or erroneous model metadata.
-                    update = dict(status="declined", notes="Player explicitly refused the offer.")
-                elif isinstance(update, dict) and update.get("status") == "active" and decision != "accepted":
+                    update = dict(status="declined", notes="Player explicitly declined the story.")
+                elif state["status"] == "offered" and model_active and decision != "accepted":
+                    update = None
+                elif isinstance(player_text, str) and isinstance(update, dict) and update.get("status") == "declined":
                     update = None
             if fresh and isinstance(update, dict):
                 old, new = state["status"], update.get("status")
@@ -266,6 +449,42 @@ class StoryManager:
 
 
 manager = StoryManager()
+
+
+def acknowledge_direct(acknowledgements):
+    from config_loader import cfg
+    if settings(cfg.get('story_events'))['enabled']:
+        return manager.acknowledge_direct(acknowledgements)
+    else:
+        with manager.lock:
+            manager.pending_direct.clear()
+            if manager._pending_loaded:
+                manager._save_pending()
+        return [dict(token=ack['token'], delivery_id=ack['delivery_id'])
+                for ack in (acknowledgements[:30] if isinstance(acknowledgements, list) else [])
+                if isinstance(ack, dict) and manager._valid_id(ack.get('token'))
+                and manager._valid_id(ack.get('delivery_id'))]
+
+
+def direct_request(player_text, ids, active):
+    from config_loader import cfg
+    return manager.direct_request(prepare(cfg.get('story_events'), active), player_text, ids, active)
+
+
+def direct_context(payload, cid):
+    from config_loader import cfg
+    if not settings(cfg.get('story_events'))['enabled']:
+        return None
+    return manager.direct_context(payload.get('story_token'), cid,
+                                  payload.get('active_id'), payload.get('player_text'))
+
+
+def direct_delivery(payload, cid, update, reply):
+    from config_loader import cfg
+    if not settings(cfg.get('story_events'))['enabled']:
+        return None
+    return manager.direct_delivery(payload.get('story_token'), cid,
+        payload.get('active_id'), payload.get('player_text'), update, reply)
 
 
 def prepare(config, active=None, readonly=False):

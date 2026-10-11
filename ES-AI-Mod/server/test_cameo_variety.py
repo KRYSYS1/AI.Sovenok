@@ -1,4 +1,5 @@
 """Offline variety regressions for both installations, without API or config I/O."""
+from test_paths import WORKSHOP_ROOT, GAME_ROOT, TEMP as TEST_TEMP, existing_paths
 import ast
 import builtins
 import json
@@ -13,7 +14,7 @@ from unittest.mock import patch
 
 
 DEV = Path(__file__).resolve().parents[1]
-WORKSHOP = Path(r"D:\Program Files (x86)\Steam\steamapps\workshop\content\331470\3809240310")
+WORKSHOP = Path(WORKSHOP_ROOT)
 CAMPERS = ["us", "mi", "dv", "sl", "un", "el", "sh", "mz", "mt", "cs"]
 
 
@@ -47,7 +48,7 @@ def cameo_environment(path):
 
 class CameoVarietyTests(unittest.TestCase):
     def test_destination_free_slots_keep_travelers_present(self):
-        for path in (DEV / "server/main.py", WORKSHOP / "server/main.py"):
+        for path in existing_paths((DEV / "server/main.py", WORKSHOP / "server/main.py")):
             tree = ast.parse(path.read_text(encoding="utf-8-sig"))
             nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                      and n.name in {"scene_encounter", "parse_cameo_tags", "resolve_direct_address"}]
@@ -72,7 +73,7 @@ class CameoVarietyTests(unittest.TestCase):
                     "Алиса, ты идешь?", scene, "sl", "beach", "mt_room"), ["dv"])
 
     def test_both_cameos(self):
-        for path in (DEV / "mod/es_ai_cameo.rpy", WORKSHOP / "es_ai_cameo.rpy"):
+        for path in existing_paths((DEV / "mod/es_ai_cameo.rpy", WORKSHOP / "es_ai_cameo.rpy")):
             with self.subTest(path=str(path)):
                 env = cameo_environment(path)
                 pools = env["ES_AI_CAMEO_BY_LOC"]
@@ -125,7 +126,7 @@ class CameoVarietyTests(unittest.TestCase):
                 self.assertEqual(len(env["ES_AI_SHOWN"]), 7)
 
     def test_both_prompts(self):
-        for path in (DEV / "server/main.py", WORKSHOP / "server/main.py"):
+        for path in existing_paths((DEV / "server/main.py", WORKSHOP / "server/main.py")):
             with self.subTest(path=str(path)):
                 tree = ast.parse(path.read_text(encoding="utf-8-sig"))
                 nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef)

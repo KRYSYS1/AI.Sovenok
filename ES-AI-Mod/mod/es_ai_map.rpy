@@ -47,7 +47,13 @@ init python:
         "bathhouse": (500, 470),
         "old_building": (177, 615),
         "catacombs": (205, 598),
+        "bunker": (205, 638),
         "mine": (235, 582),
+        "old_building_inside": (150, 615), "library_ext": (748, 225),
+        "mine_descent": (235, 615), "mine_crossroad": (270, 582),
+        "mine_room": (270, 550), "mine_coalface": (305, 550),
+        "mine_halt": (305, 615), "mine_exit": (555, 280),
+        "bus_410": (60, 245),
     }
 
     def es_ai_load_map_bg():

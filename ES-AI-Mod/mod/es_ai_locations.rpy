@@ -33,7 +33,7 @@ init -10 python:
          "bgs": ["bg int_dining_hall_day"], "dress": None,
          "desc": u"вы в столовой лагеря: пахнет компотом, котлеты и какао"},
         {"id": "library", "name": u"Библиотека", "romantic": True,
-         "bgs": ["bg int_library_day", "bg ext_library_day"], "dress": None,
+         "bgs": ["bg int_library_day"], "dress": None,
          "desc": u"вы в библиотеке лагеря: стеллажи книг и тишина"},
         {"id": "camp_gate", "name": u"Ворота лагеря", "context_only": True,
          "bgs": ["bg ext_camp_entrance_day"],
@@ -111,15 +111,47 @@ init -10 python:
                       "night": ["bg int_house_of_un_night"]}, "dress": None,
          "desc": u"вы внутри домика Лены и Мику"},
         {"id": "old_building", "name": u"Старый корпус", "context_only": True,
-         "bgs": ["bg ext_old_building_night", "bg int_old_building_night"], "dress": None,
+         "bgs": ["bg ext_old_building_night"], "dress": None,
          "desc": u"вы у заброшенного старого корпуса лагеря; вокруг темно и тревожно"},
         {"id": "catacombs", "name": u"Катакомбы", "context_only": True,
-         "bgs": ["bg int_catacombs_entrance", "bg int_catacombs_living"], "dress": None,
+         "bgs": ["bg int_catacombs_entrance"], "dress": None,
          "desc": u"вы в подземных катакомбах под старым корпусом"},
+        {"id": "bunker", "name": u"Бомбоубежище", "context_only": True,
+         "bgs": ["bg int_catacombs_living"], "dress": None,
+         "desc": u"вы в жилом помещении бомбоубежища под старым корпусом; выход ведёт в катакомбы"},
         {"id": "mine", "name": u"Шахта", "context_only": True,
-         "bgs": ["bg int_mine", "bg int_mine_crossroad", "bg int_mine_room",
-                 "bg int_mine_coalface", "bg int_mine_halt"], "dress": None,
-         "desc": u"вы в тёмной заброшенной шахте под лагерем"},
+         "bgs": ["bg int_mine"], "dress": None,
+         "desc": u"вы в коридоре заброшенной шахты под лагерем"},
+        {"id": "old_building_inside", "name": u"Старый корпус внутри", "context_only": True,
+         "bgs": ["bg int_old_building_night"], "dress": None,
+         "desc": u"вы внутри заброшенного старого корпуса; отсюда можно выйти наружу или пройти в катакомбы"},
+        {"id": "library_ext", "name": u"У библиотеки", "context_only": True,
+         "bgs": ["bg ext_library_day"],
+         "time_bgs": {"day": ["bg ext_library_day"], "sunset": ["bg ext_library_day"],
+                      "night": ["bg ext_library_night"]}, "dress": None,
+         "desc": u"вы на улице перед библиотекой лагеря, рядом вход и дорожка к площади"},
+        {"id": "mine_descent", "name": u"Спуск в шахту", "context_only": True,
+         "bgs": ["bg int_catacombs_hole"], "dress": None,
+         "desc": u"вы у подземного спуска из катакомб в шахту"},
+        {"id": "mine_room", "name": u"Комната в шахте", "context_only": True,
+         "bgs": ["bg int_mine_room"], "dress": None,
+         "desc": u"вы в отдельной комнате заброшенной шахты; проход ведёт к развилке"},
+        {"id": "mine_exit", "name": u"Выход из шахты", "context_only": True,
+         "bgs": ["bg int_mine_exit_night_light", "bg int_mine_exit_night_nolight",
+                 "bg int_mine_exit_night_torch"], "dress": None,
+         "desc": u"вы у подземного выхода из шахты на площадь лагеря; обратно можно пройти к развилке"},
+        {"id": "mine_crossroad", "name": u"Развилка шахты", "context_only": True,
+         "bgs": ["bg int_mine_crossroad"], "dress": None,
+         "desc": u"вы на развилке шахты: проходы ведут в коридор, комнату, забой, привал и к выходу"},
+        {"id": "mine_coalface", "name": u"Забой шахты", "context_only": True,
+         "bgs": ["bg int_mine_coalface"], "dress": None,
+         "desc": u"вы у забоя заброшенной шахты; обратный проход ведёт к развилке"},
+        {"id": "mine_halt", "name": u"Привал в шахте", "context_only": True,
+         "bgs": ["bg int_mine_halt"], "dress": None,
+         "desc": u"вы на площадке для привала в шахте; обратно можно пройти к развилке"},
+        {"id": "bus_410", "name": u"Автобус 410", "context_only": True,
+         "bgs": ["bg int_liaz"], "dress": None,
+         "desc": u"вы в салоне ЛиАЗа маршрута 410 вне лагеря, в контексте истории о мире «Совёнка»; выход ведёт к автобусной остановке, поездка необязательна и не означает возвращение в реальный мир"},
         # --- продолжение раздела 28: оставшиеся контекстные локации и подлокации ES 1.6 ---
         {"id": "semen_room", "name": u"Комната Семёна", "context_only": True, "romantic": True,
          "bgs": ["bg semen_room_window", "bg semen_room"],
@@ -185,26 +217,45 @@ init -10 python:
     ES_AI_LOC_LAST_EMO = ["normal"]
     ES_AI_LOC_HAS_GIRL = [False]
     ES_AI_TIME = ["day"]   # morning | day | sunset | night
-    ES_AI_CLOCK = dict(minutes=None, revision=None, enabled=False, lines=0, generation=0)
+    ES_AI_CLOCK = dict(minutes=None, revision=None, enabled=False, show_time=True, lines=0, generation=0)
+
+    def es_ai_clock_config_path():
+        """config.json пользователя (%LOCALAPPDATA%\AI.Sovenok) с самостоятельным
+        фолбэком. Нельзя вызывать es_ai_user_config_path() из cameo.rpy через
+        try/except NameError: порядок init-блоков Ren'Py с равным приоритетом не
+        гарантирован, и при загрузке locations РАНЬШЕ cameo это тихо падало в
+        NameError и читало серверный config.json без game_clock — часы выключались
+        (диагностика 14:30:52: phase=day, enabled=False при включённом тумблере)."""
+        import os
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            candidate = os.path.join(base, "AI.Sovenok", "config.json")
+            if os.path.exists(candidate):
+                return candidate
+        return os.path.join(ES_AI_SERVER_DIR, "config.json")
 
     def es_ai_clock_settings():
+        import __builtin__ as clock_builtins
         import io
         import os
         import json
-        st = dict(enabled=False, start_time="08:00", minutes_per_exchange=5, revision=0)
+        st = dict(enabled=False, show_time=True, start_time="08:00", minutes_per_exchange=5, revision=0)
         try:
-            path = es_ai_user_config_path()
+            path = es_ai_clock_config_path()
         except NameError:
             path = os.path.join(ES_AI_SERVER_DIR, "config.json")
         try:
-            with io.open(path, "r", encoding="utf-8-sig") as stream:
-                data = json.load(stream)
-            raw = data.get("game_clock") if isinstance(data, _es_ai_cameo_builtins.dict) else None
-            if isinstance(raw, _es_ai_cameo_builtins.dict):
+            # The game's bundled Python 2 lacks the utf-8-sig codec.
+            with io.open(path, "r", encoding="utf-8") as stream:
+                data = json.loads(stream.read().lstrip(u"\ufeff"))
+            raw = data.get("game_clock") if isinstance(data, clock_builtins.dict) else None
+            if isinstance(raw, clock_builtins.dict):
                 st.update((k, raw[k]) for k in st if k in raw)
         except Exception:
             pass
         st["enabled"] = st["enabled"] is True
+        if not isinstance(st["show_time"], clock_builtins.bool):
+            st["show_time"] = True
         try:
             parts = st["start_time"].strip().split(":")
             hour, minute = (int(p) for p in parts)
@@ -216,12 +267,12 @@ init -10 python:
         for key, default, upper in (("minutes_per_exchange", 5, 120), ("revision", 0, None)):
             try:
                 value = st[key]
-                if isinstance(value, _es_ai_cameo_builtins.bool):
+                if isinstance(value, clock_builtins.bool):
                     raise ValueError(key)
                 value = int(value)
-                st[key] = _es_ai_cameo_builtins.max(0, value)
+                st[key] = clock_builtins.max(0, value)
                 if upper is not None:
-                    st[key] = _es_ai_cameo_builtins.min(upper, st[key])
+                    st[key] = clock_builtins.min(upper, st[key])
             except Exception:
                 st[key] = default
         return st
@@ -245,10 +296,15 @@ init -10 python:
             fn = globals().get(visual + "_time")
             if callable(fn):
                 fn()
+            es_ai_log("clock phase -> %s (minutes=%s enabled=%s rev=%s)" %
+                      (phase, ES_AI_CLOCK["minutes"], ES_AI_CLOCK["enabled"],
+                       ES_AI_CLOCK["revision"]))
         if changed and redraw:
             # No movement, NPC lifecycle, context reset, or layout reroll.
+            bg = es_ai_loc_bg(es_ai_location())
+            es_ai_log("clock bg -> %s (loc=%s)" % (bg, ES_AI_LOC_CUR[0]))
             renpy.scene()
-            renpy.show(es_ai_loc_bg(es_ai_location()))
+            renpy.show(bg)
             es_ai_refresh_girls()
             renpy.with_statement(dissolve)
 
@@ -256,6 +312,7 @@ init -10 python:
         st = es_ai_clock_settings()
         was_enabled = ES_AI_CLOCK["enabled"]
         ES_AI_CLOCK["enabled"] = st["enabled"]
+        ES_AI_CLOCK["show_time"] = st["show_time"]
         if was_enabled != st["enabled"]:
             ES_AI_CLOCK["generation"] += 1
         if st["enabled"]:
@@ -275,7 +332,8 @@ init -10 python:
                     phase=ES_AI_TIME[0])
 
     def es_ai_clock_text():
-        return es_ai_clock_snapshot()["time"] if ES_AI_CLOCK["enabled"] else ""
+        return (es_ai_clock_snapshot()["time"]
+                if ES_AI_CLOCK["enabled"] and ES_AI_CLOCK.get("show_time", True) else "")
 
     def es_ai_clock_begin(redraw=True):
         es_ai_clock_sync(redraw=redraw)
@@ -288,20 +346,22 @@ init -10 python:
             ES_AI_CLOCK["minutes"] = (ES_AI_CLOCK["minutes"] + st["minutes_per_exchange"]) % 1440
             es_ai_apply_time_phase(es_ai_clock_phase(ES_AI_CLOCK["minutes"]))
     ES_AI_SHOWN = []       # All current participants; list order does not set positions.
+    ES_AI_FREE_SCENE = [False]  # Overlay chat is private, even while chat_active is true.
     ES_AI_GIRL_LAYOUT = [None, {}]  # Last (location, sorted IDs, primary ID) and slots.
     ES_AI_DRESS = [None]   # контекстный наряд В ПРЕДЕЛАХ локации: None|"swim"|"cover"|"sport"
+    ES_AI_PARTY = [False]  # Current public event, reset on travel/session reset.
 
     # --- Карта лагеря (соседство локаций): переходы должны быть логичны ---
     # Не жёсткое ограничение — используется, чтобы подсказать нейросети, куда
     # логично пройти отсюда (список соседей уходит в контекст /chat и /initiative).
     ES_AI_MAP = {
-        "square": ["houses", "dining_ext", "clubs", "musclub", "library", "stage",
-                   "playground", "aidpost", "path", "camp_gate", "semen_room"],
+        "square": ["houses", "dining_ext", "clubs", "musclub", "library_ext", "stage",
+                   "playground", "aidpost", "path", "camp_gate", "semen_room", "mine_exit"],
         "camp_gate": ["square", "bus_gate", "gate_no_bus", "road"],
         "bus_gate": ["camp_gate", "gate_no_bus", "bus_inside"],
         "gate_no_bus": ["camp_gate", "bus_gate", "road"],
         "bus_inside": ["bus_gate"],
-        "bus_stop": ["road"],
+        "bus_stop": ["road", "bus_410"], "bus_410": ["bus_stop"],
         "road": ["camp_gate", "gate_no_bus", "bus_stop"],
         "houses": ["square", "dv_house_ext", "sl_house_ext", "un_house_ext",
                    "mt_house_ext", "semen_room", "playground", "aidpost"],
@@ -313,7 +373,7 @@ init -10 python:
         "dining_ext": ["square", "dining"], "dining": ["dining_ext"],
         "clubs": ["square", "club_room", "musclub"], "club_room": ["clubs"],
         "musclub": ["square", "clubs", "musclub_inside"], "musclub_inside": ["musclub"],
-        "library": ["square"],
+        "library_ext": ["square", "library"], "library": ["library_ext"],
         "stage": ["square", "stage_big"], "stage_big": ["stage", "square"],
         "playground": ["square", "houses"],
         "aidpost": ["square", "houses", "aidpost_inside"], "aidpost_inside": ["aidpost"],
@@ -324,8 +384,14 @@ init -10 python:
         "island": ["beach", "boathouse"],
         "boathouse": ["beach", "island"],
         "bathhouse": ["beach", "washstand"],
-        "old_building": ["polyana", "path", "catacombs"],
-        "catacombs": ["old_building", "mine"], "mine": ["catacombs"],
+        "old_building": ["polyana", "path", "old_building_inside"],
+        "old_building_inside": ["old_building", "catacombs"],
+        "catacombs": ["old_building_inside", "bunker", "mine_descent"],
+        "bunker": ["catacombs"], "mine_descent": ["catacombs", "mine"],
+        "mine": ["mine_descent", "mine_crossroad"],
+        "mine_crossroad": ["mine", "mine_room", "mine_coalface", "mine_halt", "mine_exit"],
+        "mine_room": ["mine_crossroad"], "mine_coalface": ["mine_crossroad"],
+        "mine_halt": ["mine_crossroad"], "mine_exit": ["mine_crossroad", "square"],
     }
 
     # Слова-подсказки для контекстного подбора наряда (реплики Семёна + героини).
@@ -343,7 +409,20 @@ init -10 python:
         u"прижал", u"прижа", u"свидание", u"только мы вдвоём", u"нежно", u"ласков", u"страст")
 
 
+    def es_ai_scene_begin(free_scene):
+        es_ai_girls_reset()
+        ES_AI_FREE_SCENE[0] = bool(free_scene)
+
+    def es_ai_scene_end():
+        ES_AI_FREE_SCENE[0] = False
+        es_ai_girls_reset()
+
     def es_ai_girls_reset():
+        globals().get("ES_AI_ACTIVITY_PENDING", {}).clear()
+        ES_AI_DRESS[0] = None
+        ES_AI_LOC_LAST_CHAR[0] = None
+        ES_AI_LOC_LAST_EMO[0] = "normal"
+        ES_AI_PARTY[0] = False
         ES_AI_SHOWN[:] = []
         ES_AI_GIRL_LAYOUT[:] = [None, {}]
         # Состояние «остающихся» камео и хвост реплик — тоже с нуля.
@@ -398,20 +477,35 @@ init -10 python:
             ES_AI_GIRL_LAYOUT[:] = [key, layout]
         for g in ES_AI_SHOWN:
             x, zoom, yoffset, row_z = ES_AI_GIRL_LAYOUT[1][g["id"]]
+            if g.get("cameo") and ES_AI_LOC_CUR[0] == "beach":
+                if g.get("dress_reason", "location") == "location" and g.get("dress") in (None, "swim"):
+                    g["dress"] = es_ai_default_dress()
+                else:
+                    g["dress"] = es_ai_cameo_dress(None, g.get("dress"), g)
             # Cameos keep per-NPC clothing, including water-location swim defaults,
             # independently of the active heroine's contextual dress.
             dp = g["dress"] if ("dress" in g) else es_ai_loc_dress_pref()
             tag = es_ai_resolve_sprite(g["id"], g["emo"], dress_pref=dp)
             g["tag"] = tag
+            z = row_z + 300 - ES_AI_HEIGHTS.get(g["id"], 160)
+            z += 2000 if g.get("focused") else (50 if not g.get("cameo") else 0)
+            requested = "%s %s%s" % (g["id"], g["emo"], " " + dp if dp else "")
+            matches = tuple(t for t in (requested + " close", requested, requested + " far")
+                            if renpy.has_image(t, exact=True))
+            diagnostic = (g["emo"], dp, tag, matches, x, zoom, yoffset, z)
+            if g.get("_sprite_diag") != diagnostic:
+                g["_sprite_diag"] = diagnostic
+                es_ai_log("sprite id=%s emo=%s dress=%r tag=%r exact_matches=%r xpos=%.4f zoom=%.2f yoffset=%s zorder=%s" %
+                          ((g["id"],) + diagnostic))
             if tag:
                 # Focus clears every row without changing the speaker's slot.
-                z = row_z + 300 - ES_AI_HEIGHTS.get(g["id"], 160)
-                z += 2000 if g.get("focused") else (50 if not g.get("cameo") else 0)
                 try:
                     renpy.show(tag, at_list=[Transform(xpos=float(x), xanchor=0.5,
                         yalign=1.0, zoom=zoom, yoffset=yoffset)], zorder=z)
                 except Exception as e:
                     es_ai_log("girl show error: %s" % e)
+            else:
+                renpy.hide(g["id"])
 
     def es_ai_girl_enter(char_id, emotion):
         """Показать выбранную героиню и убрать предыдущую.
@@ -419,18 +513,45 @@ init -10 python:
         У разных героинь разные image-теги (un, dv, sl...), поэтому обычный
         renpy.show() не заменяет прошлый спрайт автоматически.
         """
-        current_emo = emotion or "normal"
-        if any(not g.get("cameo") and g["id"] != char_id for g in ES_AI_SHOWN):
-            es_ai_cameo_clear()
-        for g in ES_AI_SHOWN:
-            if g.get("id") == char_id and not emotion:
-                current_emo = g.get("emo") or "normal"
-
-        # Оставшиеся в сцене камео не уходят, когда говорит героиня: их записи
-        # и спрайты сохраняем, прячем только «чужие» теги.
-        keep = [g for g in ES_AI_SHOWN if g.get("cameo") and g["id"] != char_id]
+        global es_ai_char_id, es_ai_who_name
+        es_ai_char_id = char_id
+        es_ai_who_name = next((c[1] for c in ES_AI_CHARS if c[0] == char_id), char_id)
+        if not ES_AI_FREE_SCENE[0]:
+            es_ai_girls_reset()
+        previous = next((g for g in ES_AI_SHOWN if not g.get("cameo")), None)
+        selected = next((g for g in ES_AI_SHOWN if g["id"] == char_id), None)
+        saved = es_ai_cameo_take_nearby(char_id)
+        switching = previous is None or previous["id"] != char_id
+        if switching:
+            # Clothing and recent romantic context belong to the former primary.
+            ES_AI_CAMEO_PLAYER_TEXT[0] = u""
+            ES_AI_RECENT_LINES[:] = []
+            if previous is not None:
+                previous.update(cameo=True, dress=es_ai_current_dress(),
+                    dress_reason="player" if ES_AI_DRESS[0] else "location",
+                    dress_location=ES_AI_LOC_CUR[0])
+                if ES_AI_DRESS[0] == "cover":
+                    previous["dress"] = "pioneer"
+                if previous.get("tag") and previous.get("dress") not in previous["tag"].split():
+                    previous["dress"] = None
+                es_ai_cameo_register(previous["id"], 0)
+            selected = selected or saved
+            ES_AI_DRESS[0] = None
+            if selected is not None:
+                own_dress = es_ai_cameo_dress(None, selected.get("dress"), selected)
+                if selected.get("tag") and own_dress and own_dress not in selected["tag"].split():
+                    own_dress = None
+                if not (ES_AI_LOC_CUR[0] == "beach" and own_dress == "swim" and selected.get("dress_reason") == "location"):
+                    ES_AI_DRESS[0] = "cover" if own_dress == "pioneer" else own_dress
+            elif ES_AI_PARTY[0] and es_ai_has_party_dress(char_id):
+                ES_AI_DRESS[0] = "dress"
+        selected = selected if selected is not None else {"id": char_id}
+        current_emo = emotion or selected.get("emo") or "normal"
+        selected.update(emo=current_emo)
+        for field in ("cameo", "dress", "dress_reason", "dress_location", "dwell"):
+            selected.pop(field, None)
+        keep = [g for g in ES_AI_SHOWN if g["id"] != char_id]
         es_ai_cameo_unregister(char_id)
-        es_ai_cameo_take_nearby(char_id)
         staying = set(g["id"] for g in keep)
         for cid, _name, _color in ES_AI_CHARS:
             if cid != char_id and cid not in staying:
@@ -438,10 +559,15 @@ init -10 python:
                     renpy.hide(cid)
                 except Exception:
                     pass
-        ES_AI_SHOWN[:] = [{"id": char_id, "emo": current_emo}] + keep
+        ES_AI_SHOWN[:] = [selected] + keep
+        capacity = es_ai_cameo_capacity()
+        for g in keep[capacity:]:
+            es_ai_cameo_park(g["id"], announce=False)
         for g in ES_AI_SHOWN:
             g.pop("focused", None)
         ES_AI_LOC_HAS_GIRL[0] = True
+        ES_AI_LOC_LAST_CHAR[0] = char_id
+        ES_AI_LOC_LAST_EMO[0] = current_emo
         es_ai_refresh_girls()
 
     def es_ai_set_time(t):
@@ -457,6 +583,17 @@ init -10 python:
     # Список, а не dict: порядок важен для пересекающихся фраз
     # («автобус у ворот» должен определиться раньше просто «ворот»).
     ES_AI_LOC_ALIASES = [
+        ("old_building_inside", (u"внутри старого корпуса", u"внутрь старого корпуса", u"старый корпус внутри",
+                                 u"в старом корпусе", u"в старый корпус", u"внутри старого здания", u"old building interior", u"inside the old building")),
+        ("library_ext", (u"на улице у библиотеки", u"улица библиотеки", u"у библиотеки", u"к библиотеке",
+                         u"возле библиотеки", u"перед библиотекой", u"снаружи библиотеки", u"library exterior", u"outside the library")),
+        ("mine_descent", (u"спуск в шахту", u"спуску в шахту", u"спуска в шахту", u"спуске в шахту", u"mine descent")),
+        ("mine_room", (u"комната в шахте", u"комнату в шахте", u"комнате в шахте", u"комнаты в шахте", u"mine room")),
+        ("mine_exit", (u"выход из шахты", u"выходу из шахты", u"выхода из шахты", u"выходе из шахты", u"mine exit")),
+        ("mine_crossroad", (u"развилка шахты", u"развилку шахты", u"развилке шахты", u"развилки шахты", u"развилк в шахте", u"mine crossroad", u"mine junction")),
+        ("mine_coalface", (u"забой шахты", u"забою шахты", u"забоя шахты", u"забое шахты", u"забой в шахте", u"mine coalface")),
+        ("mine_halt", (u"привал в шахте", u"привалу в шахте", u"привала в шахте", u"привале в шахте", u"mine halt", u"mine rest stop")),
+        ("bus_410", (u"автобус 410", u"автобуса 410", u"автобусу 410", u"автобусе 410", u"лиаз", u"лиазе", u"bus 410", u"liaz")),
         # раздел 28 (продолжение): контекстные подлокации — специфичные фразы идут
         # РАНЬШЕ общих, чтобы «у столовой» не спуталось со «столовой» и т.п.
         ("semen_room", (u"комната семёна", u"комнату семёна", u"комнате семёна",
@@ -487,9 +624,13 @@ init -10 python:
         ("sl_room", (u"домик слави", u"комната слави", u"домик жени", u"комната жени")),
         ("un_room", (u"домик лены", u"комната лены", u"домик мику", u"комната мику")),
         ("camp_gate", (u"ворота лагеря", u"к воротам", u"вход в лагерь")),
-        ("old_building", (u"старый корпус", u"старое здание", u"заброшенный корпус")),
+        ("bunker", (u"бомбоубежище", u"бомбоубежища", u"бомбоубежищу", u"бомбоубежищем",
+                    u"убежище", u"убежища", u"убежищу", u"убежищем",
+                    u"бункер", u"бункера", u"бункеру", u"бункере", u"бункером",
+                    u"bunker", u"bomb shelter")),
+        ("old_building", (u"старый корпус", u"старого корпуса", u"старое здание", u"заброшенный корпус", u"old building")),
         ("catacombs", (u"катакомб", u"подземель")),
-        ("mine", (u"в шахту", u"заброшенная шахта", u"в рудник")),
+        ("mine", (u"в шахту", u"в шахте", u"заброшенная шахта", u"в рудник", u"mine corridor")),
         ("boathouse", (u"лодочная станция", u"к лодкам", u"на причал")),
         ("washstand", (u"умывальник", u"умыться")),
         ("road", (u"дорога к лагерю", u"на дорогу", u"по дороге")),
@@ -512,6 +653,7 @@ init -10 python:
 
     def es_ai_location_id(value):
         """ID или русское название локации -> канонический ID."""
+        import re
         if value is None:
             return None
         try:
@@ -522,35 +664,76 @@ init -10 python:
             return text
         for loc_id, aliases in ES_AI_LOC_ALIASES:
             for alias in aliases:
-                if alias in text:
+                if alias in text and (loc_id != "bunker" or re.search(
+                        r"(?<!\w)" + re.escape(alias) + r"(?!\w)", text, re.UNICODE)):
                     return loc_id
         return None
 
     def es_ai_location_from_dialog(player_text, reply):
         """Локальный фолбэк: распознать переход даже если сервер не вернул goto."""
+        import re
         try:
             player = unicode(player_text or u"").lower()
             answer = unicode(reply or u"").lower()
         except Exception:
             return None
         combined = player + u" " + answer
+        # Questions and refusals must not become travel through a model reply.
+        if re.search(u"\\b(?:не|нет|not|no|don't|where|где|зачем)\\b|[?]", player):
+            return None
         if not any(word in combined for word in ES_AI_MOVE_WORDS):
             return None
         for loc_id, aliases in ES_AI_LOC_ALIASES:
             for alias in aliases:
-                if alias in combined:
+                if alias in combined and (loc_id != "bunker" or re.search(
+                        r"(?<!\w)" + re.escape(alias) + r"(?!\w)", combined, re.UNICODE)):
                     return loc_id
         return None
 
     def es_ai_apply_actions(res, player_text=None):
         """Применить goto/time; при отсутствии goto понять переход из диалога."""
+        global es_ai_char_id
         if not hasattr(res, "get"):
             es_ai_log("location action skipped: response has no get()")
             return
+        es_ai_log("live-chain-20261011 apply before=%s request=%r current=%r response=%r" %
+                  (ES_AI_LOC_LAST_CHAR[0], res.get("_request_trace"),
+                   es_ai_request_trace(ES_AI_LOC_LAST_CHAR[0], player_text) if player_text is not None else None,
+                   [(key, res.get(key)) for key in ("id", "switch_primary", "goto", "dress", "movement_blocked", "travel_all", "travel_with", "cameo_aside")]))
         goto_raw = res.get("goto")
+        switch = res.get("switch_primary")
+        if switch:
+            local = set(g["id"] for g in ES_AI_SHOWN) | set(
+                g["id"] for g in ES_AI_CAMEO_NEARBY.get(ES_AI_LOC_CUR[0], []))
+            eligible = set(c[0] for c in ES_AI_CHARS)
+            if (not isinstance(switch, basestring) or switch not in local or switch not in eligible
+                    or switch == ES_AI_LOC_LAST_CHAR[0] or (goto_raw is not None and not es_ai_location_id(goto_raw))
+                    or res.get("movement_blocked") or not player_text
+                    or es_ai_read_cameo_settings().get("scene_auto_primary") is not True):
+                res["movement_blocked"] = True
+                res["suppress_main_reply"] = True
+                res["cameo"] = []
+                res["cameo_requested"] = True
+                es_ai_log("automatic primary rejected: invalid local transition")
+                return
+            previous = ES_AI_LOC_LAST_CHAR[0]
+            origin = ES_AI_LOC_CUR[0]
+            es_ai_girl_enter(switch, "normal")
+            es_ai_char_id = switch
+            es_ai_cameo_park(previous, announce=False)
+            es_ai_log("live-bind-20261011 primary before=%s after=%s origin=%s shown=%r parked=%r" %
+                      (previous, ES_AI_LOC_LAST_CHAR[0], origin,
+                       [g["id"] for g in ES_AI_SHOWN][:16],
+                       [g["id"] for g in ES_AI_CAMEO_NEARBY.get(origin, [])][:16]))
+        aside = res.get("cameo_aside", [])
+        if isinstance(aside, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)):
+            for cid in aside:
+                es_ai_cameo_park(cid, announce=False)
         loc_id = es_ai_location_id(goto_raw)
-        if not loc_id:
+        if not loc_id and not res.get("movement_blocked"):
             loc_id = es_ai_location_from_dialog(player_text, res.get("reply", ""))
+        if res.get("movement_blocked"):
+            loc_id = None
         es_ai_log("location action: goto=%r fallback=%r current=%s" %
                   (goto_raw, loc_id, ES_AI_LOC_CUR[0]))
         if loc_id and loc_id != ES_AI_LOC_CUR[0]:
@@ -562,8 +745,9 @@ init -10 python:
             leaving = res.get("cameo_leave", [])
             farewell = isinstance(leaving, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)) and bool(leaving)
             es_ai_set_location(loc_id, ES_AI_LOC_LAST_CHAR[0],
-                               ES_AI_LOC_LAST_EMO[0], cameo_arrive=not (explicit_arrival or farewell),
-                               travel_all=res.get("travel_all") is True)
+                               ES_AI_LOC_LAST_EMO[0], cameo_arrive=not (explicit_arrival or farewell or switch),
+                                travel_all=res.get("travel_all") is True,
+                                travel_with=res.get("travel_with"))
             es_ai_log("location changed: %s" % loc_id)
         tm = res.get("time")
         if tm and not ES_AI_CLOCK["enabled"]:
@@ -571,13 +755,35 @@ init -10 python:
         # Наряд по контексту: сначала явный тег сервера [action:dress:...],
         # иначе — клиентский разбор реплик и настроения. Делается ПОСЛЕ смены
         # локации, чтобы учитывать базовый наряд уже нового места.
-        dress_sig = res.get("dress")
+        if not player_text and not res.get("reply") and not res.get("dress"):
+            return
+        es_ai_apply_party_context(player_text, res.get("reply", ""))
+        active = ES_AI_LOC_LAST_CHAR[0]
+        request = es_ai_cameo_clothing_request(active, player_text, unnamed=True)
+        other_request = any(es_ai_cameo_clothing_request(cid, player_text) for cid, _, _ in ES_AI_CHARS if cid != active)
+        dress_sig = request or (None if other_request else res.get("dress"))
+        night_beach = es_ai_location().get("id") == "beach" and es_ai_clothing_night()
+        romantic_swim = night_beach and es_ai_beach_romantic_clothing(player_text, res.get("reply", ""))
+        if night_beach and not request and not other_request and not romantic_swim and es_ai_no_swimming(player_text):
+            dress_sig = "cover"
+        if dress_sig in ("swim", u"купальник", u"купаться") and not (
+                request == "swim" or es_ai_current_dress() == "swim" or
+                romantic_swim or
+                es_ai_dress_from_context(player_text, "", es_ai_location()) == "swim"):
+            dress_sig = None
+        if dress_sig in ("dress", "party", u"платье") and not (request == "dress" or ES_AI_PARTY[0]):
+            dress_sig = None
         if not dress_sig:
-            dress_sig = es_ai_dress_from_context(player_text, res.get("reply", ""),
-                                                 es_ai_location())
+            dress_sig = None if other_request else es_ai_dress_from_context(player_text, res.get("reply", ""),
+                                                  es_ai_location())
+        if dress_sig in ("swim", u"купальник", u"купаться") and ES_AI_LOC_CUR[0] == "beach" and ES_AI_DRESS[0] is None and es_ai_default_dress() == "swim" and not request and es_ai_dress_from_context(player_text, "", es_ai_location()) != "swim":
+            dress_sig = None  # A model echo of the location default is not player authorization.
         if dress_sig:
             es_ai_set_dress(dress_sig)
             es_ai_log("dress -> %s (%s)" % (ES_AI_DRESS[0], dress_sig))
+        es_ai_log("live-chain-20261011 applied active=%s location=%s party=%s dress=%r shown=%r" %
+                  (ES_AI_LOC_LAST_CHAR[0], ES_AI_LOC_CUR[0], ES_AI_PARTY[0], ES_AI_DRESS[0],
+                   [(g["id"], g.get("dress"), g.get("tag")) for g in ES_AI_SHOWN][:16]))
 
     def es_ai_location():
         return ES_AI_LOCATION_INDEX.get(ES_AI_LOC_CUR[0], ES_AI_LOCATION_INDEX["square"])
@@ -611,6 +817,36 @@ init -10 python:
                 return bg
         return loc["bgs"][0]
 
+    def es_ai_clothing_night():
+        minutes = ES_AI_CLOCK.get("minutes")
+        if ES_AI_CLOCK.get("enabled") and isinstance(minutes, (_es_ai_cameo_builtins.int, _es_ai_cameo_builtins.float)) and not isinstance(minutes, _es_ai_cameo_builtins.bool) and 0 <= minutes < 1440:
+            return minutes >= 1320 or minutes < 360
+        return ES_AI_TIME[0] == "night"
+
+    def es_ai_default_dress(loc=None):
+        loc = es_ai_location() if loc is None else loc
+        if loc.get("id") == "beach" and es_ai_clothing_night():
+            return None
+        return loc.get("dress")
+
+    def es_ai_no_swimming(text):
+        import re
+        return bool(re.search(u"\\b(?:купаться\\s*(?:ночью\\s*)?не\\s*будем|не\\s*будем\\s*купаться|не\\s*хочу\\s*купаться)\\b", unicode(text or u"").lower(), re.UNICODE))
+
+    def es_ai_beach_romantic_clothing(player_text, reply):
+        import re
+        cid = ES_AI_LOC_LAST_CHAR[0]
+        player = unicode(player_text or u"").lower()
+        answer = unicode(reply or u"").lower()
+        # Affection alone is not an outfit request; require a voluntary clothing reply.
+        return (cid in ES_AI_ROMANCEABLE and cid not in ("us", "uv")
+                and cid in es_ai_cameo_adult_home_ids()
+                and bool(es_ai_location().get("romantic"))
+                and bool(re.search(u"\\b(?:поцелу\\w*|обним\\w*|люблю тебя|свидание)\\b", player, re.UNICODE))
+                and not bool(re.search(u"\\b(?:не|нет|not)\\b|[?]", player + u" " + answer, re.UNICODE))
+                and bool(re.search(u"\\b(?:да|хочу|согласна|давай)\\b", answer, re.UNICODE))
+                and bool(re.search(u"\\b(?:надену|переоденусь)\\s+(?:в\\s+)?(?:купальник|бикини)\\b", answer, re.UNICODE)))
+
     def es_ai_current_dress():
         """Актуальный предпочтительный наряд с учётом контекста.
 
@@ -619,12 +855,12 @@ init -10 python:
         cover -> вернуть форму, swim -> купальник, sport -> спортивная.
         """
         loc = es_ai_location()
-        base = loc.get("dress")
+        base = es_ai_default_dress(loc)
         ov = ES_AI_DRESS[0]
         if ov == "swim":
             return "swim"
-        if ov == "sport":
-            return "sport"
+        if ov in ("sport", "dress"):
+            return ov
         if ov == "cover":
             return None
         return base
@@ -639,16 +875,51 @@ init -10 python:
         except Exception:
             sig = str(sig or "").strip().lower()
         table = {u"swim": "swim", u"купальник": "swim", u"купаться": "swim",
+                 u"dress": "dress", u"party": "dress", u"платье": "dress",
                  u"sport": "sport", u"спорт": "sport", u"спортивн": "sport",
                  u"cover": "cover", u"форма": "cover", u"форму": "cover",
                  u"pioneer": "cover", u"одеть": "cover", u"normal": "cover"}
         val = table.get(sig)
         if not val:
             return
+        if val == "dress" and not es_ai_has_party_dress(ES_AI_LOC_LAST_CHAR[0]):
+            return
         if ES_AI_DRESS[0] != val:
             ES_AI_DRESS[0] = val
             if ES_AI_SHOWN:
                 es_ai_refresh_girls()
+
+    def es_ai_apply_party_context(player_text, reply):
+        ES_AI_CAMEO_PLAYER_TEXT[0] = player_text or u""
+        active = ES_AI_LOC_LAST_CHAR[0]
+        requests = {cid: es_ai_cameo_clothing_request(cid, player_text, unnamed=(cid == active))
+                    for cid, _, _ in ES_AI_CHARS}
+        event = es_ai_party_context(player_text)
+        es_ai_log("live-bind-20261011 party active=%s event=%r previous=%s requests=%r" %
+                  (active, event, ES_AI_PARTY[0],
+                   [(cid, request) for cid, request in requests.items() if request][:16]))
+        # A question/rejection cannot be turned into intent by the model reply.
+        import re
+        if event is None and not any(requests.values()) and not re.search(
+                u"\\b(?:где|когда|зачем|не|нет|where|when|why|not)\\b|[?]", unicode(player_text or u"").lower()):
+            public_reply = unicode(reply or u"").lower()
+            if re.search(u"\\b(?:готовимся|готовим|танцуем|начался|началась|ид[её]т)\\b", public_reply):
+                event = es_ai_party_context(public_reply)
+        if not any(requests.values()) and event is not None:
+            ES_AI_PARTY[0] = event
+        for g in ES_AI_SHOWN:
+            cid = g["id"]
+            request = requests.get(cid)
+            if g.get("cameo"):
+                g["dress"] = es_ai_cameo_dress(request, g.get("dress"), g)
+            elif request:
+                es_ai_set_dress(request)
+            elif ES_AI_PARTY[0] and ES_AI_DRESS[0] not in ("cover", "swim", "sport"):
+                es_ai_set_dress("dress")
+            elif event is False and ES_AI_DRESS[0] == "dress":
+                ES_AI_DRESS[0] = None
+        if ES_AI_SHOWN:
+            es_ai_refresh_girls()
 
     def es_ai_dress_from_context(player_text, reply, loc):
         """Определить наряд по репликам и настроению (клиентский фолбэк).
@@ -658,8 +929,18 @@ init -10 python:
         похолодало/серьёзный разговор -> вернуть форму; а в романтических
         локациях или вечером интимный настрой -> купальник.
         """
+        request = es_ai_cameo_clothing_request(ES_AI_LOC_LAST_CHAR[0], player_text, unnamed=True)
+        if request:
+            return request
+        if loc.get("id") == "beach" and es_ai_clothing_night() and es_ai_no_swimming(player_text):
+            return "cover"
+        import re
+        if re.search(u"\\bне\\s+(?:надень|надевай|переоденься|оденься|прикройся)\\b", unicode(player_text or u"").lower()):
+            return None
+        if ES_AI_PARTY[0] and ES_AI_DRESS[0] not in ("cover", "swim", "sport"):
+            return "dress"
         try:
-            combined = (unicode(player_text or u"") + u" " + unicode(reply or u"")).lower()
+            combined = unicode(player_text or u"").lower()
         except Exception:
             return None
         if any(w in combined for w in ES_AI_DRESS_SWIM_WORDS):
@@ -669,6 +950,8 @@ init -10 python:
         # Романтическое переодевание — только для романсибельных (совершеннолетних)
         # героинь. Для Ульяны (ребёнок) романтический переход в купальник запрещён.
         romantic_place = bool(loc.get("romantic")) or ES_AI_TIME[0] in ("sunset", "night")
+        if loc.get("id") == "beach" and es_ai_clothing_night():
+            return None
         if (romantic_place and es_ai_char_id in ES_AI_ROMANCEABLE
                 and any(w in combined for w in ES_AI_DRESS_ROMANTIC_WORDS)):
             return "swim"
@@ -687,6 +970,8 @@ init -10 python:
         """Описание текущего места + логичные соседи — уходит в контекст LLM."""
         loc = es_ai_location()
         desc = loc.get("desc", u"")
+        if loc.get("id") == "beach" and es_ai_clothing_night():
+            desc = u"вы на ночном пляже у реки: песок, шум воды и звёзды; обычная одежда по умолчанию, купание не подразумевается"
         nb = es_ai_neighbors_text()
         if nb:
             desc = desc + u". Отсюда рядом и логично пройти к: " + nb
@@ -698,7 +983,7 @@ init 10 python:
         es_ai_set_location(loc_id, char_id=ES_AI_LOC_LAST_CHAR[0],
                            emotion=ES_AI_LOC_LAST_EMO[0])
 
-    def es_ai_set_location(loc_id, char_id=None, emotion=None, cameo_arrive=True, travel_all=False):
+    def es_ai_set_location(loc_id, char_id=None, emotion=None, cameo_arrive=True, travel_all=False, travel_with=None):
         """Сменить локацию: фон + вернуть героиню в подходящей одежде."""
         loc = ES_AI_LOCATION_INDEX.get(loc_id)
         if not loc:
@@ -707,10 +992,18 @@ init 10 python:
         # Новая локация -> вернуть базовый наряд (у воды это купальник).
         # При простом обновлении фона (смена времени суток) наряд не сбрасываем.
         if changed:
-            if not travel_all:
-                for g in _es_ai_cameo_builtins.list(ES_AI_SHOWN):
-                    if g.get("cameo"):
-                        es_ai_cameo_park(g["id"], announce=False)
+            globals().get("ES_AI_ACTIVITY_PENDING", {}).clear()
+            ES_AI_PARTY[0] = False
+            selected = (set(cid for cid in travel_with if isinstance(cid, basestring))
+                        if isinstance(travel_with, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple))
+                        else set(g["id"] for g in ES_AI_SHOWN if g.get("cameo")) if travel_all else set())
+            local = set(g["id"] for g in ES_AI_SHOWN) | set(g["id"] for g in ES_AI_CAMEO_NEARBY.get(ES_AI_LOC_CUR[0], []))
+            for cid in selected & local:
+                if not any(g["id"] == cid for g in ES_AI_SHOWN):
+                    es_ai_cameo_enter(cid, "normal", stay=True)
+            for g in _es_ai_cameo_builtins.list(ES_AI_SHOWN):
+                if g.get("cameo") and g["id"] not in selected:
+                    es_ai_cameo_park(g["id"], announce=False)
             for g in ES_AI_SHOWN:
                 es_ai_cameo_take_nearby(g["id"])
             ES_AI_DRESS[0] = None
@@ -723,6 +1016,8 @@ init 10 python:
             for g in ES_AI_SHOWN:
                 if g.get("cameo"):
                     g["dress"] = es_ai_cameo_dress()
+                    g["dress_reason"] = "location"
+                    g["dress_location"] = loc["id"]
             if ES_AI_SHOWN:
                 es_ai_recent_push("Narrator", "The company moved together to %s: %s." %
                     (loc["id"], ", ".join(es_ai_cameo_name(g["id"]) for g in ES_AI_SHOWN)))
@@ -734,7 +1029,10 @@ init 10 python:
         except Exception:
             pass
         renpy.scene()
-        renpy.show(es_ai_loc_bg(loc))  # es_ai_loc_bg учитывает время суток
+        _bg = es_ai_loc_bg(loc)
+        es_ai_log("location bg -> %s (loc=%s phase=%s)" %
+                  (_bg, loc["id"], ES_AI_TIME[0]))
+        renpy.show(_bg)  # es_ai_loc_bg учитывает время суток
         if ES_AI_SHOWN:
             es_ai_refresh_girls()
         renpy.with_statement(dissolve)
