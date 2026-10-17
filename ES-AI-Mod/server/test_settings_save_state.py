@@ -36,7 +36,7 @@ class SettingsSaveStateTests(unittest.TestCase):
         env = dict(json=json, native_vars=["model"], root=Mock(),
                    character_overrides={}, flush_character_voice=Mock(), load_character_voice=Mock(),
                       cameo_on=[True], auto_primary_on=[False], activity_on=[True], clock_on=[False], clock_show_time=[True], story_on=[False],
-                   story_intensity=["low"], ui_lang=["ru"], saved_state=[None],
+                    story_choices=[False], story_intensity=["low"], ui_lang=["ru"], saved_state=[None],
                    player_name_var=Mock(), prompt_data=copy.deepcopy(data),
                    prompt_targets=[("un", "NPC", False), ("player", "Player", True)],
                    prompt_idx=[1], persona_text=Mock(), pr_save=Mock(),
@@ -82,7 +82,7 @@ class SettingsSaveStateTests(unittest.TestCase):
                 env["refresh_save_state"]()
                 self.assertEqual(env["b_save"].kind, "chip")
                 for key, value in (("auto_primary_on", True), ("activity_on", False), ("clock_on", True), ("clock_show_time", False), ("story_on", True),
-                                   ("story_intensity", "high"), ("ui_lang", "en")):
+                                    ("story_choices", True), ("story_intensity", "high"), ("ui_lang", "en")):
                     previous = env[key][0]
                     env[key][0] = value
                     env["refresh_save_state"]()
@@ -237,12 +237,14 @@ class SettingsSaveStateTests(unittest.TestCase):
                            tts_refresh=Mock(), stt_refresh=Mock(), sync_key_field=Mock(),
                            key_vars={"key": Mock()}, save_all=Mock(return_value=True))
                 env["story_on"][0] = env["clock_on"][0] = True
+                env["story_choices"][0] = True
                 env["character_overrides"]["un"] = {"provider": "off", "voice_id": ""}
                 env["clock_show_time"][0] = False
                 env["activity_on"][0] = False
                 exec(compile(ast.Module(body=[reset], type_ignores=[]), "reset", "exec"), env)
                 env["reset_all"]()
                 self.assertEqual(env["story_on"][0], not settings)
+                self.assertEqual(env["story_choices"][0], not settings)
                 self.assertEqual(env["clock_on"][0], not settings)
                 self.assertEqual(env["clock_show_time"][0], settings)
                 self.assertEqual(env["activity_on"][0], settings)
@@ -483,6 +485,32 @@ class SettingsSaveStateTests(unittest.TestCase):
                                      "clock_time_f", "clock_step_l", "clock_step_f", "clock_minus", "clock_plus"):
                             self.assertFalse(env[name].visible, name)
                         self.assertEqual(env["b_save"].kind, "chip")
+                        self.assertFalse(env["story_choices_sw"].visible)
+                        self.assertFalse(env["story_choices_lbl"].visible)
+                        env["story_sw"].command()
+                        root.update_idletasks()
+                        child = env["story_choices_lbl"]
+                        for language, expected in (("ru", "Сюжетные выборы"), ("en", "Story choices")):
+                            window.ui_lang[0] = language
+                            child.retranslate()
+                            root.update_idletasks()
+                            self.assertIs(env["story_choices_lbl"], child)
+                            self.assertEqual(env["canvas"].itemcget(child.id, "text"), expected)
+                            self.assertTrue(env["story_choices_sw"].visible)
+                            self.assertTrue(child.visible)
+                        window.ui_lang[0] = "ru"
+                        child.retranslate()
+                        self.assertEqual(env["canvas"].coords(env["story_choices_sw"].img_id)[0] -
+                                         env["canvas"].coords(env["story_sw"].img_id)[0],
+                                          24)
+                        env["story_choices_sw"].command()
+                        self.assertTrue(env["story_choices"][0])
+                        env["story_sw"].command()
+                        root.update_idletasks()
+                        self.assertTrue(env["story_choices"][0])
+                        self.assertFalse(env["story_choices_sw"].visible)
+                        self.assertFalse(child.visible)
+                        self.assertEqual(env["b_save"].kind, "primary")
                         env["model_var"].set("offline-smoke-model")
                         root.update_idletasks()
                         self.assertEqual(env["b_save"].kind, "primary")
@@ -491,6 +519,8 @@ class SettingsSaveStateTests(unittest.TestCase):
                         self.assertEqual(env["b_save"].kind, "chip")
                         loader.save_config.assert_called_once_with()
                         self.assertIs(loader.cfg["npc_activity_enabled"], True)
+                        self.assertEqual(loader.cfg["story_events"],
+                                         dict(enabled=False, intensity="low", choices_enabled=True))
                         loader.save_keys.assert_called_once_with()
                         window._post.assert_called_once_with("/reload")
                         language = "English" if window.ui_lang[0] == "ru" else "Русский"
@@ -501,6 +531,8 @@ class SettingsSaveStateTests(unittest.TestCase):
                         self.assertEqual(lang.text, window.tr("Язык/Lang"))
                         self.assertEqual(env["canvas"].itemcget(env["clock_show_lbl"].id, "text"),
                                          window.tr("Показывать время"))
+                        self.assertEqual(env["canvas"].itemcget(env["story_choices_lbl"].id, "text"),
+                                         window.tr("Сюжетные выборы"))
                         self.assertEqual(lang.w, lang.nat_w)
                         self.assertEqual(env["b_save"].kind, "chip")
                         env["persona_text"].insert("end", " offline persona")

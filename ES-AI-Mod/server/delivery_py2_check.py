@@ -8,6 +8,11 @@ import sys
 import tempfile
 import types
 import __future__
+import ast
+try:
+    import __builtin__ as builtins
+except ImportError:
+    import builtins
 
 # Ren'Py's bundled interpreter does not add the script directory to sys.path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -110,6 +115,31 @@ def check():
                 code = compile(blocks[0], filename, "exec", __future__.unicode_literals.compiler_flag, True)
                 require(code.co_flags & __future__.unicode_literals.compiler_flag)
                 check_init(code)
+            if filename == "es_ai_api.rpy":
+                names = set(("es_ai_sanitize_text", "es_ai_story_choices_record", "es_ai_story_choices_menu", "es_ai_story_input_take"))
+                nodes = [node for block in blocks for node in ast.parse(block).body
+                         if isinstance(node, ast.FunctionDef) and node.name in names]
+                selected, menus = ["help"], []
+                class Renpy(object):
+                    def display_menu(self, items, **kwargs):
+                        menus.append(items)
+                        return selected[0]
+                choice_env = dict(dict=StoreDict, list=StoreList, str=StoreStr,
+                                  _es_ai_cameo_builtins=builtins, renpy=Renpy(), ES_AI_FREE_SCENE=[True],
+                                  ES_AI_STORY_INPUT=dict(pending=None, selection=None, choice=None))
+                eval(compile(ast.Module(nodes), filename, "exec", __future__.unicode_literals.compiler_flag, True), choice_env)
+                offer = dict(token="a" * 36, version=3, options=[dict(id="help", text=u"\u0414\u0430"), dict(id="no", text=u"\u041d\u0435\u0442")])
+                choice_env["es_ai_story_choices_record"](offer)
+                require(not menus)
+                choice_env["es_ai_story_choices_menu"]()
+                require(menus[0][-1][1] == ("custom",))
+                require(choice_env["es_ai_story_input_take"]() == u"\u0414\u0430")
+                require(choice_env["ES_AI_STORY_INPUT"]["selection"]["id"] == "help")
+                selected[0] = ("custom",)
+                choice_env["es_ai_story_choices_record"](offer)
+                choice_env["es_ai_story_choices_menu"]()
+                require(choice_env["es_ai_story_input_take"]() is None)
+                require(choice_env["ES_AI_STORY_INPUT"]["selection"] is None)
         directory = tempfile.mkdtemp(dir=TEMP)
         try:
             for nonempty in (False, True):

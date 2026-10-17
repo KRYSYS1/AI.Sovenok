@@ -162,7 +162,9 @@ class DirectStoryTests(unittest.TestCase):
                 # A private next request processes only opaque delivery IDs, not public speech.
                 env["resolve_direct_address"] = lambda *a: None
                 llm.chat.return_value = "(normal) Private reply"
-                env["chat"](dict(character="un", text="private next turn", story_acks=[delivered["story_ack"]]))
+                ordinary = env["chat"](dict(character="un", text="private next turn", story_acks=[delivered["story_ack"]]))
+                self.assertEqual(mod.manager.state["turns"], before["turns"] + 1)
+                mod.manager.acknowledge_direct([ordinary['story_ack']])
                 self.assertEqual(mod.manager.state["status"], "active")
                 self.assertEqual(mod.manager.state["turns"], before["turns"] + 2)
                 self.assertEqual(llm.chat.call_count, 3)

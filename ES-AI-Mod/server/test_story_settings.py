@@ -99,7 +99,8 @@ class StorySettingsTests(unittest.TestCase):
                     env["story_on"][0] = enabled
                     env["select_story_intensity"](intensity)
                     extract([assignment, persist, reload], env)
-                    self.assertEqual(env["cfg"]["story_events"], dict(enabled=enabled, intensity=intensity))
+                    self.assertEqual(env["cfg"]["story_events"], dict(enabled=enabled, intensity=intensity,
+                                                                    choices_enabled=False))
                     env["_post"].assert_called_with("/reload")
             self.assertEqual(env["config_loader"].save_config.call_count, 6)
 
@@ -111,9 +112,9 @@ class StorySettingsTests(unittest.TestCase):
                           and isinstance(n.test, ast.Name) and n.test.id == "want_settings")
             story_branch = copy.deepcopy(branch)
             story_branch.body = [n for n in story_branch.body if
-                                 (isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "story_on[0]") or
+                                  (isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) in ("story_on[0]", "story_choices[0]")) or
                                  (isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and
-                                  ast.unparse(n.value.func) in ("story_sw.set_on", "select_story_intensity"))]
+                                   ast.unparse(n.value.func) in ("story_sw.set_on", "story_choices_sw.set_on", "select_story_intensity"))]
             for selected in (False, True):
                 env["want_settings"] = selected
                 extract([story_branch], env)
@@ -124,7 +125,7 @@ class StorySettingsTests(unittest.TestCase):
         for server in SERVERS:
             for lang in ("ru", "en"):
                 _, env = self.environment(server, lang=lang)
-                for name in ("story_lbl", "story_note"):
+                for name in ("story_lbl", "story_choices_lbl", "story_note"):
                     text = env["tr"](env[name].src)
                     self.assertEqual(any("\u0400" <= c <= "\u04ff" for c in text), lang == "ru")
                 self.assertEqual([env["tr"](c.src) for _, c in env["story_chips"]],
@@ -134,7 +135,7 @@ class StorySettingsTests(unittest.TestCase):
                 env["story_on"][0] = True
                 for width in (744, 924, 1224):
                     end = env["lay_story"](28, 28 + width, 150)
-                    self.assertEqual(env["story_note"].geo[2], width)
+                    self.assertEqual(env["story_note"].geo[2], width - 24)
                     self.assertGreater(env["story_note"].geo[1], 150 + env["story_sw"].h)
                     self.assertGreater(end, env["story_note"].bbox()[3])
 

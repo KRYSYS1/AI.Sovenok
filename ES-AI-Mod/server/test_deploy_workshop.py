@@ -41,7 +41,14 @@ class DeploymentTests(unittest.TestCase):
             b"def run_settings_window(): pass\ndef _log_window_error(): pass\ndef _show_error_box(): pass\n")
         self.files["server/settings.pyw"] = (
             b"from settings_window import run_settings_window, _log_window_error, _show_error_box\n")
-        self.files["server/main.py"] = b"import npc_activity, scene_memory, selected_companions, story_events\n"
+        self.files["server/main.py"] = (
+            b"import npc_activity, scene_memory, selected_companions, story_events\n"
+            b"from clothing_policy import cameo_requested_dress, clothing_refused, romantic_choice, private_scene\n")
+        self.files["server/clothing_policy.py"] = (
+            b"def cameo_requested_dress(cid, text, unnamed=False): pass\n"
+            b"def clothing_refused(reply): pass\n"
+            b"def romantic_choice(cid, age, player, reply, private): pass\n"
+            b"def private_scene(scene, cid): pass\n")
         for root in (self.source, self.target):
             for name, data in self.files.items():
                 path = root / name
@@ -71,6 +78,9 @@ class DeploymentTests(unittest.TestCase):
         deploy.verify(self.bundle, self.target)
         self.assertEqual(self.snapshot(self.target), self.original)
         self.assertEqual(set(self.snapshot(self.bundle)), set(deploy.PATHS) | {"manifest.json"})
+        self.assertIn("server/clothing_policy.py", deploy.PATHS)
+        self.assertNotIn("server/test_clothing_requests.py", deploy.PATHS)
+        self.assertEqual(first["validation"]["python_modules"], len(deploy.trees(self.files)))
 
     def test_apply_only_changes_selected_code(self):
         self.change()
@@ -127,10 +137,13 @@ class DeploymentTests(unittest.TestCase):
             deploy.verify(self.bundle)
 
     def test_missing_closure(self):
-        (self.source / "server/scene_memory.py").unlink()
-        with self.assertRaises(OSError):
-            self.build()
-        self.assertFalse(self.bundle.exists())
+        for name in ("server/scene_memory.py", "server/clothing_policy.py"):
+            with self.subTest(name=name):
+                (self.source / name).unlink()
+                with self.assertRaises(OSError):
+                    self.build()
+                self.assertFalse(self.bundle.exists())
+                (self.source / name).write_bytes(self.files[name])
 
     def test_missing_character_seed_refused(self):
         (self.source / "server/es_characters.json").unlink()
@@ -206,9 +219,14 @@ class DeploymentTests(unittest.TestCase):
             self.build()
 
     def test_launcher_missing_export_refused(self):
-        self.change("server/settings_window.py", b"def run_settings_window(): pass\n")
-        with self.assertRaisesRegex(deploy.DeploymentError, "Missing import exports"):
-            self.build()
+        for name, data in (("server/settings_window.py", b"def run_settings_window(): pass\n"),
+                           ("server/clothing_policy.py", b"def clothing_refused(reply): pass\n")):
+            with self.subTest(name=name):
+                self.change(name, data)
+                with self.assertRaisesRegex(deploy.DeploymentError, "Missing import exports"):
+                    self.build()
+                self.assertFalse(self.bundle.exists())
+                self.change(name, self.files[name])
 
     def test_launcher_missing_helpers_refused(self):
         self.change("server/settings.pyw", b"from settings_window import run_settings_window\n")

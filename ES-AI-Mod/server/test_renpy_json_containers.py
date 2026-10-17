@@ -101,10 +101,10 @@ class JsonContainerTests(unittest.TestCase):
                    es_ai_maybe_cameo=unexpected, es_ai_is_romantic_moment=unexpected)
         code = extract(root, "es_ai_cameo.rpy", {
             "es_ai_read_cameo_settings", "es_ai_read_cameo_flag", "es_ai_cameo_on",
-            "es_ai_write_cameo_setting", "es_ai_scene_snapshot", "es_ai_try_cameo",
+            "es_ai_write_cameo_setting", "es_ai_scene_snapshot", "es_ai_actual_outfits", "es_ai_try_cameo",
             "es_ai_cameo_enter", "es_ai_cameo_home_reason", "es_ai_cameo_dress", "es_ai_cameo_clothing_request", "es_ai_cameo_register", "es_ai_cameo_leave",
             "es_ai_cameo_unregister", "es_ai_cameo_take_nearby", "es_ai_cameo_capacity", "es_ai_cameo_group_size",
-            "es_ai_cameo_deliver_group"}, {"ES_AI_CAMEO_DEFAULTS", "ES_AI_CAMEO_BY_LOC",
+            "es_ai_cameo_deliver_group", "es_ai_clothing_refused", "es_ai_clothing_cover_choice"}, {"ES_AI_CAMEO_DEFAULTS", "ES_AI_CAMEO_BY_LOC",
                                       "ES_AI_CAMEO_ACTIVE", "ES_AI_CAMEO_NEARBY",
                                       "ES_AI_CAMEO_HOMES", "ES_AI_CAMEO_CHANGING_ADULT_AGES"})
         exec(code, env)

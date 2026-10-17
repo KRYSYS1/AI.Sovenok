@@ -79,8 +79,9 @@ class NightBeachTests(unittest.TestCase):
                 ("обнимемся", "Да, обнимемся", None),
                 ("романтика", "Да, надену купальник", None),
                 ("обнимемся", "Нет, не хочу", None),
-                ("обнимемся", "Да, хочу, надену купальник", "swim")):
+                 ("обнимемся", "Да, хочу, надену купальник", "swim")):
                 env = self.environment(root)
+                env["ES_AI_SHOWN"][:] = [dict(id="sl", emo="normal")]
                 env["es_ai_apply_actions"]({"dress": "swim", "reply": answer}, player)
                 self.assertEqual(env["ES_AI_DRESS"][0], expected)
             for cid in ("us", "uv", "sl"):
@@ -89,6 +90,40 @@ class NightBeachTests(unittest.TestCase):
                 env["es_ai_cameo_adult_home_ids"] = lambda: set()
                 self.assertFalse(env["es_ai_beach_romantic_clothing"]("обнимемся", "Да, хочу, надену купальник"))
 
+    def test_privacy_and_affection_never_infer_an_outfit(self):
+        for root in ROOTS:
+            for location in ("un_room", "library", "square", "beach"):
+                for phase in ("day", "sunset", "night"):
+                    for text in ("давай останемся наедине", "хочу побыть наедине с Мику",
+                                 "Славя я хочу побыть наедине с Мику", "поцелуй меня",
+                                 "обнимемся", "люблю тебя", "романтика", "только мы вдвоём"):
+                        with self.subTest(root=root, location=location, phase=phase, text=text):
+                            env = self.environment(root)
+                            env["ES_AI_LOC_CUR"][0] = location
+                            env["ES_AI_TIME"][0] = phase
+                            loc = env["es_ai_location"]()
+                            if "наедине" in text:
+                                self.assertFalse(env["es_ai_is_romantic_moment"]("sl", text, "Да"))
+                            self.assertIsNone(env["es_ai_dress_from_context"](text, "Да, поцелую", loc))
+                            env["es_ai_apply_actions"]({"dress": None, "reply": "Да, поцелую"}, text)
+                            self.assertIsNone(env["ES_AI_DRESS"][0])
+                            env["es_ai_apply_actions"]({"dress": "swim"}, text)
+                            self.assertIsNone(env["ES_AI_DRESS"][0])
+
+    def test_explicit_addressed_outfits_still_override_context(self):
+        for root in ROOTS:
+            for text, expected in (("Славя, надень форму", "cover"),
+                                   ("Славя, надень платье", "dress"),
+                                   ("Славя, надень купальник", "swim")):
+                env = self.environment(root)
+                env["ES_AI_LOC_CUR"][0] = "un_room"
+                self.assertEqual(env["es_ai_dress_from_context"](text, "", env["es_ai_location"]()), expected)
+                env["es_ai_apply_actions"]({}, text)
+                self.assertEqual(env["ES_AI_DRESS"][0], expected)
+            env = self.environment(root)
+            env["es_ai_apply_actions"]({"dress": "sport"}, "Славя, надень спортивную одежду")
+            self.assertEqual(env["ES_AI_DRESS"][0], "sport")
+
     def test_python2_future_flag_executes_policy(self):
         exe = os.path.join(GAME_ROOT, "lib/windows-i686/python.exe")
         if not os.path.isfile(exe):
@@ -96,7 +131,7 @@ class NightBeachTests(unittest.TestCase):
         code = r'''import ast,io,re,textwrap,sys,os,__builtin__,__future__
 flags=__future__.unicode_literals.compiler_flag
 e={'_es_ai_cameo_builtins':__builtin__}
-names=('es_ai_default_dress','es_ai_clothing_night','es_ai_no_swimming','es_ai_beach_romantic_clothing','es_ai_current_dress','es_ai_cameo_dress','es_ai_cameo_clothing_request','es_ai_cameo_home_reason','es_ai_cameo_adult_home_ids')
+names=('es_ai_default_dress','es_ai_clothing_night','es_ai_no_swimming','es_ai_beach_romantic_clothing','es_ai_current_dress','es_ai_cameo_dress','es_ai_cameo_clothing_request','es_ai_cameo_home_reason','es_ai_cameo_adult_home_ids','es_ai_clothing_refused')
 for filename in ('es_ai_locations.rpy','es_ai_cameo.rpy'):
     with io.open(os.path.join(sys.argv[1],filename),encoding='utf-8') as stream:
         source=stream.read().lstrip(u'\ufeff')
@@ -109,6 +144,9 @@ e.update(ES_AI_CLOCK={'enabled':True,'minutes':1320},ES_AI_TIME=['day'],ES_AI_LO
 e['es_ai_location']=lambda: {'id':'beach','dress':'swim','romantic':True}
 e['ES_AI_SERVER_DIR']=os.path.join(os.path.dirname(sys.argv[1]) if os.path.basename(sys.argv[1])=='mod' else sys.argv[1],'server')
 e['ES_AI_CAMEO_HOMES']={'sl':'sl_room','us':'dv_room','uv':'unknown'}
+e['ES_AI_SHOWN']=[{'id':'sl'}]
+assert e['es_ai_cameo_clothing_request']('sl',u'\u0432 \u0431\u0438\u043a\u0438\u043d\u0438 \u043f\u0435\u0440\u0435\u043e\u0434\u0435\u043d\u044c\u0441\u044f',True)=='swim'
+assert e['es_ai_cameo_clothing_request']('sl',u'\u0432 \u043a\u0443\u043f\u0430\u043b\u044c\u043d\u0438\u043a \u043d\u0435 \u043f\u0435\u0440\u0435\u043e\u0434\u0435\u0432\u0430\u0439\u0441\u044f',True) is None
 assert 'sl' in e['es_ai_cameo_adult_home_ids']()
 assert not set(['us','uv']) & e['es_ai_cameo_adult_home_ids']()
 assert e['es_ai_current_dress']() is None
@@ -123,7 +161,7 @@ assert e['es_ai_current_dress']()=='swim'
 print('Python 2 unicode_literals clothing policy passed')
 '''
         for root in ROOTS:
-            result = subprocess.run([exe, "-O", "-B", "-c", code, root], capture_output=True, text=True)
+            result = subprocess.run([exe, "-B", "-c", code, root], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

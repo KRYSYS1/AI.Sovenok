@@ -253,3 +253,27 @@ init 11 python:
             renpy.notify(u"История диалогов очищена")
         except Exception as e:
             renpy.notify(u"Ошибка: %s" % e)
+screen es_ai_story_choice(items):
+    modal True
+    window:
+        background Frame(get_image("gui/choice/" + persistent.timeofday + "/choice_box.png"), 50, 50)
+        xfill True
+        yalign 0.5
+        padding (75, 50)
+        vbox:
+            xalign 0.5
+            for item in items:
+                button:
+                    background None
+                    xalign 0.5
+                    action item.action
+                    text item.caption:
+                        substitute False
+                        font header_font
+                        size 37
+                        hover_size 37
+                        color {"day": "#466123", "night": "#145644", "sunset": "#69652f", "prologue": "#496463"}[persistent.timeofday]
+                        hover_color {"day": "#9dcd55", "night": "#3ccfa2", "sunset": "#dcd168", "prologue": "#98d8da"}[persistent.timeofday]
+                        xcenter 0.5
+                        text_align 0.5
+                        xmaximum 1600

@@ -3,7 +3,7 @@
   "development_only": ["server/test_paths.py", "server/delivery_py2_check.py", "server/test_*.py"],
   "flavor": "workshop",
   "server": [
-    "characters_store.py", "es_characters.json", "config_loader.py", "conversation.py", "llm_client.py",
+    "characters_store.py", "clothing_policy.py", "es_characters.json", "config_loader.py", "conversation.py", "llm_client.py",
     "main.py", "npc_activity.py", "scene_memory.py", "selected_companions.py",
     "settings_window.py", "settings.pyw", "start_server.pyw", "story_events.py",
     "stt_client.py", "tts_client.py", "ui_i18n.py", "user_data_transfer.py"

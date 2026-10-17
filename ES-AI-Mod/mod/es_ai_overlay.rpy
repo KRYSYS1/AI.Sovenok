@@ -92,7 +92,7 @@ label es_ai_overlay_loop:
         jump es_ai_overlay_loop
 
     $ persistent.es_ai_last_char = es_ai_overlay_char
-    $ es_ai_say_girl(es_ai_overlay_char, _res.get("reply", ""), _res.get("emotion"))
+    $ es_ai_say_girl(es_ai_overlay_char, _res.get("reply", ""), _res.get("emotion"), story_ack=_res.get("story_ack"))
     $ es_ai_delivery_flush()
     jump es_ai_overlay_loop
 

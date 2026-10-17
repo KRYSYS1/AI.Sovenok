@@ -146,7 +146,7 @@ class GameClockTests(unittest.TestCase):
         from test_cameo_clothing import install_delivery_say
         install_delivery_say(root, env)
         load(os.path.join(root, "es_ai_cameo.rpy"), env,
-             {"es_ai_request_trace", "es_ai_party_context", "es_ai_cameo_clothing_request"})
+             {"es_ai_request_trace", "es_ai_party_context", "es_ai_cameo_clothing_request", "es_ai_clothing_cover_choice"})
         env["ES_AI_CHARS"] = [("un", "un", "")]
         load(os.path.join(root, "es_ai_api.rpy"), env,
              {"es_ai_story_ack_record", "es_ai_story_ack_snapshot", "ES_AI_STORY_ACKS"})
@@ -492,6 +492,7 @@ print('Python 2 clock: 23:00 night -> 23:05 night')
                 if callable(fn):
                     e[name] = types.FunctionType(fn.__code__, e, name, fn.__defaults__)
             e.update(es_ai_location_context=lambda: "square", es_ai_scene_snapshot=lambda cid: {},
+                     ES_AI_STORY_INPUT=dict(pending=None, selection=None, choice=None),
                      ES_AI_CAMEO_PLAYER_TEXT=[""],
                      es_ai_cameo_name=lambda cid: cid, es_ai_recent_snapshot=lambda n: [],
                      es_ai_girl_enter=lambda *a: None, es_ai_sanitize_text=lambda s: s,
@@ -575,6 +576,7 @@ print('Python 2 clock: 23:00 night -> 23:05 night')
             for i, block in enumerate(blocks):
                 self.assertEqual(block.count("es_ai_clock_complete"), 1)
                 code = textwrap.dedent(re.sub(r"(?m)^(\s*)\$ ", r"\1", block))
+                code = re.sub(r"(?m)^(\s*)jump es_ai_pick$", r"\1raise AssertionError('unexpected detach')", code)
                 for suppress, main, cameo, expected in ((False, "Hi", True, 5),
                         (True, "", True, 5), (False, "", False, 0)):
                     e = self.environment(root)
@@ -586,7 +588,7 @@ print('Python 2 clock: 23:00 night -> 23:05 night')
                              es_ai_char_name=lambda cid: cid,
                              es_ai_apply_actions=lambda *a: None)
 
-                    def say(*args):
+                    def say(*args, **kwargs):
                         if args[1].strip():
                             e["ES_AI_CLOCK"]["lines"] += 1
 
@@ -594,7 +596,7 @@ print('Python 2 clock: 23:00 night -> 23:05 night')
                         if cameo:
                             e["ES_AI_CLOCK"]["lines"] += 3
 
-                    e.update(es_ai_say_girl=say, es_ai_try_cameo=cameos)
+                    e.update(es_ai_say_girl=say, es_ai_try_cameo=cameos, es_ai_story_choices_menu=lambda: None)
                     exec(compile(code, "reply-label", "exec"), e)
                     self.assertEqual(e["ES_AI_CLOCK"]["minutes"], 480 + expected)
                     patch.stopall()
@@ -610,6 +612,7 @@ print('Python 2 clock: 23:00 night -> 23:05 night')
                 if callable(fn):
                     e[name] = types.FunctionType(fn.__code__, e, name, fn.__defaults__)
             e.update(es_ai_location_context=lambda: "square", es_ai_scene_snapshot=lambda cid: {},
+                     ES_AI_STORY_INPUT=dict(pending=None, selection=None, choice=None),
                      es_ai_context_snapshot=lambda: [], set_es_ai_error=lambda *a: None,
                      es_ai_girl_enter=lambda *a: None, es_ai_sanitize_text=lambda s: s,
                      es_ai_speakers={"un": lambda s: None})

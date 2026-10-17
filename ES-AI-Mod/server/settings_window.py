@@ -967,7 +967,7 @@ def run_settings_window():
 
     def settings_snapshot():
         return (tuple(root.getvar(str(var)) for var in native_vars),
-                (cameo_on[0], auto_primary_on[0], activity_on[0], clock_on[0], clock_show_time[0], story_on[0], story_intensity[0], ui_lang[0]),
+                (cameo_on[0], auto_primary_on[0], activity_on[0], clock_on[0], clock_show_time[0], story_on[0], story_choices[0], story_intensity[0], ui_lang[0]),
                 json.dumps({cid: dict(value, provider="auto" if value.get("provider", "auto") == "inherit"
                                       else value.get("provider", "auto"), voice_id=value.get("voice_id", "").strip())
                             if isinstance(value, dict) else value
@@ -1116,7 +1116,8 @@ def run_settings_window():
         cfg["game_clock"] = clock
         cfg["scene_auto_primary"] = bool(auto_primary_on[0])
         cfg["npc_activity_enabled"] = bool(activity_on[0])
-        cfg["story_events"] = dict(enabled=bool(story_on[0]), intensity=story_intensity[0])
+        cfg["story_events"] = dict(enabled=bool(story_on[0]), intensity=story_intensity[0],
+                                   choices_enabled=bool(story_choices[0]))
         try:
             config_loader.save_config()
             config_loader.save_keys()
@@ -1426,6 +1427,8 @@ def run_settings_window():
             load_character_voice()
             story_on[0] = False
             story_sw.set_on(False)
+            story_choices[0] = False
+            story_choices_sw.set_on(False)
             select_story_intensity("low")
             clock_on[0] = False
             auto_primary_on[0] = False
@@ -2386,7 +2389,7 @@ def run_settings_window():
                 canvas.tag_bind(row["preview"].tag, "<Enter>",
                                 lambda e: set_status(u"Прослушать голос"), add="+")
                 row["remove"] = Chip(u"×", lambda r=row: remove_voice_character(r["cid"]),
-                                     h=34, padx=0, min_w=34)
+                                     font=(family, 14), h=34, padx=0, min_w=34)
                 row["remove"].nat_w = 34
                 row["controls"] = [row[key] for key in ("character", "provider", "voice", "preview", "remove")]
                 row["traces"] = [(var, var.trace_add("write", lambda *_args, r=row: flush_character_voice(r)))
@@ -2843,6 +2846,7 @@ def run_settings_window():
     story_initial = cfg.get("story_events")
     story_initial = story_initial if isinstance(story_initial, dict) else {}
     story_on = [story_initial.get("enabled") is True]
+    story_choices = [story_initial.get("choices_enabled") is True]
     story_intensity = [story_initial.get("intensity", "low")]
     if story_intensity[0] not in ("low", "medium", "high"):
         story_intensity[0] = "low"
@@ -2859,23 +2863,35 @@ def run_settings_window():
         for key, chip in story_chips:
             chip.set_selected(key == value)
 
+    def toggle_story_choices():
+        story_choices[0] = not story_choices[0]
+        story_choices_sw.set_on(story_choices[0])
+        layout()
+
     story_sw = CanvasSwitch(story_on[0], toggle_story)
     story_lbl = Txt(u"Сюжетные события", F, CREAM)
+    story_choices_sw = CanvasSwitch(story_choices[0], toggle_story_choices)
+    story_choices_lbl = Txt(u"Сюжетные выборы", F, CREAM)
     story_chips = [(key, Chip(text, lambda key=key: select_story_intensity(key)))
                    for key, text in (("low", u"Редко"), ("medium", u"Умеренно"), ("high", u"Активно"))]
     select_story_intensity(story_intensity[0])
-    story_note = Txt(u"Небольшие истории по контексту. Можно отказаться; без обязательных переходов.",
+    story_note = Txt(u"Небольшие истории по контексту. Выборы: 2-4 варианта и свой ответ. Можно отказаться.",
                      FS, HINT, anchor="nw")
 
     def lay_story(x0, x1, y):
         story_sw.place(x0, y + 4)
         story_lbl.place(x0 + story_sw.w + 12, y + 4 + story_sw.h / 2.0)
         if not story_on[0]:
-            for obj in [chip for _, chip in story_chips] + [story_note]:
+            for obj in [chip for _, chip in story_chips] + [story_choices_sw, story_choices_lbl, story_note]:
                 obj.hide()
             return y + story_sw.h + 16
-        y = flow([chip for _, chip in story_chips], x0, y + story_sw.h + 16, x1 - x0) + 12
-        story_note.place(x0, y, width=x1 - x0)
+        y += story_sw.h + 16
+        child_left = x0 + 24
+        story_choices_sw.place(child_left, y + 4)
+        story_choices_lbl.place(child_left + story_choices_sw.w + 8, y + 4 + story_choices_sw.h / 2.0)
+        y += story_choices_sw.h + 16
+        y = flow([chip for _, chip in story_chips], child_left, y, x1 - child_left) + 12
+        story_note.place(child_left, y, width=x1 - child_left)
         box = story_note.bbox()
         return y + (box[3] - box[1] if box else 32) + 16
 
@@ -2888,13 +2904,13 @@ def run_settings_window():
                         clock_step_f, clock_plus, clock_show_sw, clock_show_lbl):
                 obj.hide()
             return y
-        indent = x0 + clock_sw.w + 8
-        clock_show_sw.place(indent, y + 4)
-        clock_show_lbl.place(indent + clock_show_sw.w + 8, y + 4 + clock_show_sw.h / 2.0)
+        child_left = x0 + 24
+        clock_show_sw.place(child_left, y + 4)
+        clock_show_lbl.place(child_left + clock_show_sw.w + 8, y + 4 + clock_show_sw.h / 2.0)
         y += clock_show_sw.h + 16
-        clock_time_l.place(x0, y + 8)
-        clock_time_f.place(x0, y + LBL, 110, H)
-        sx = x0 + 140
+        clock_time_l.place(child_left, y + 8)
+        clock_time_f.place(child_left, y + LBL, 110, H)
+        sx = child_left + 140
         clock_step_l.place(sx, y + 8)
         clock_minus.place(sx, y + LBL)
         clock_step_f.place(sx + clock_minus.nat_w + 6, y + LBL, 64, H)
@@ -3120,12 +3136,13 @@ def run_settings_window():
         cameo_sw.place(x0, y + 4)
         cameo_lbl.place(x0 + cameo_sw.w + 12, y + 4 + cameo_sw.h / 2.0)
         y += cameo_sw.h + 16
+        child_left = x0 + 24
         for title, value, slider in ((cf_l, cf_val, cf_sl), (cl_l, cl_val, cl_sl),
                                      (ci_l, ci_val, ci_sl), (cx_l, cx_val, cx_sl)):
             if cameo_on[0]:
-                title.place(x0, y + 8)
+                title.place(child_left, y + 8)
                 value.place(x1, y + 8)
-                slider.place(x0, y + LBL, cw)
+                slider.place(child_left, y + LBL, x1 - child_left)
                 y += ROW
             else:
                 for obj in (title, value, slider):

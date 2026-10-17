@@ -130,6 +130,10 @@ class LongStorySessionTests(unittest.TestCase):
                             self.assertEqual(mod.manager.state, committed)
                         else:
                             self.assertNotIn("story:", out["reply"])
+                            if 'story_ack' in out:
+                                if before is not None:
+                                    self.assertEqual(mod.manager.state, before)
+                                env['scene_flush'](dict(story_acks=[out['story_ack']]))
                         state = mod.manager.state
                         expected = "inactive" if turn < 7 else "offered" if turn in (7, 19) else "declined" if turn < 19 else "completed" if turn == 36 else "active"
                         self.assertEqual(state["status"], expected, turn)

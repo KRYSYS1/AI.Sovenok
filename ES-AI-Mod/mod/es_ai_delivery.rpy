@@ -141,7 +141,7 @@ init 12 python:
         except Exception as e:
             es_ai_log("delivery snapshot failed: %s" % e)
 
-    def es_ai_delivery_say(speaker, text, speaker_id, raw, story_ack=None):
+    def es_ai_delivery_say(speaker, text, speaker_id, raw, story_ack=None, choices=None):
         """Ren'Py 7.4: show_done follows text validation, precedes ui.interact."""
         original = speaker.display_args.get("callback")
         if original is None:
@@ -155,6 +155,8 @@ init 12 python:
                 recorded[0] = True
                 es_ai_public_record(speaker_id, raw)
                 es_ai_story_ack_record(story_ack)
+                if choices is not None:
+                    es_ai_story_choices_record(choices)
                 ES_AI_CLOCK["lines"] += 1
                 es_ai_delivery_flush(send=False)
             for callback in callbacks:

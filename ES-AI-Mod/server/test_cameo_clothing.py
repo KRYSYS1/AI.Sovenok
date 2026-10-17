@@ -82,7 +82,7 @@ def install_delivery_say(root, env):
     actual = env["es_ai_delivery_say"]
     env["es_ai_delivery_flush"] = lambda **kw: None
 
-    def say(speaker, text, cid, raw, ack=None):
+    def say(speaker, text, cid, raw, ack=None, choices=None):
         class Character:
             display_args = {"callback": None}
 
@@ -90,7 +90,7 @@ def install_delivery_say(root, env):
                 result = speaker(value)
                 callback("show_done", interact=True, type="say")
                 return result
-        return actual(Character(), text, cid, raw, ack)
+        return actual(Character(), text, cid, raw, ack, choices)
     env["es_ai_delivery_say"] = say
 
 
@@ -111,7 +111,8 @@ class ClothingTests(unittest.TestCase):
         load(os.path.join(root, "es_ai_locations.rpy"), env,
              {"es_ai_default_dress", "es_ai_clothing_night", "es_ai_no_swimming"})
         load(os.path.join(root, "es_ai_api.rpy"), env,
-             {"es_ai_story_ack_record", "es_ai_story_ack_snapshot", "ES_AI_STORY_ACKS"})
+             {"es_ai_story_ack_record", "es_ai_story_ack_snapshot", "ES_AI_STORY_ACKS",
+              "ES_AI_STORY_INPUT", "es_ai_story_choices_record"})
         env["es_ai_clock_snapshot"] = lambda: dict(enabled=False, time="08:00", phase="day")
         env["ES_AI_FREE_SCENE"] = [True]
         env["ES_AI_LOCATION_INDEX"] = dict.fromkeys(list(env["ES_AI_CAMEO_BY_LOC"]) + ["bus_stop"], {})
@@ -192,6 +193,43 @@ class ClothingTests(unittest.TestCase):
             env["ES_AI_LOC_CUR"][0] = "square"
             env["es_ai_cameo_enter"]("sl", "normal", dress="swim")
             self.assertIsNone(env["ES_AI_SHOWN"][0]["dress"])
+
+    def test_privacy_handoff_preserves_each_existing_outfit(self):
+        import copy
+        import test_clothing_long_session as long_session
+        for root in ROOTS:
+            for active in ("sl", "mi"):
+                for initial in (None, "swim"):
+                    with self.subTest(root=root, active=active, initial=initial):
+                        env = long_session.ClothingLongSessionTests().environment(root)
+                        env["_images"].add("mi normal swim")
+                        env["ES_AI_LOC_CUR"][0] = "un_room"
+                        env["ES_AI_TIME"][0] = "night"
+                        env["ES_AI_CLOCK"].update(enabled=True, minutes=59)
+                        env["es_ai_cameo_adult_home_ids"] = lambda: {"sl", "mi", "un"}
+                        env["ES_AI_LOC_LAST_CHAR"][0] = active
+                        env["es_ai_char_id"] = active
+                        env["ES_AI_DRESS"][0] = initial if active == "mi" else None
+                        env["ES_AI_SHOWN"][:] = [dict(id=cid, emo="normal", cameo=cid != active,
+                            dress=initial if cid == "mi" else None,
+                            dress_reason="night_home" if cid == "mi" and initial else "location",
+                            dress_location="un_room") for cid in (active, "mi" if active == "sl" else "sl", "un")]
+                        env["es_ai_refresh_girls"]()
+                        sl = copy.deepcopy(next(g for g in env["ES_AI_SHOWN"] if g["id"] == "sl"))
+                        response = dict(id="mi", privacy=True, scene_depart=["sl", "un"],
+                                        dress=None, reply="Пойдём на пляж")
+                        if active != "mi":
+                            response["switch_primary"] = "mi"
+                        env["es_ai_apply_actions"](response, "Славя я хочу побыть наедине с Мику")
+                        self.assertEqual(env["ES_AI_LOC_CUR"][0], "un_room")
+                        self.assertEqual(env["ES_AI_LOC_LAST_CHAR"][0], "mi")
+                        self.assertEqual(env["ES_AI_DRESS"][0], initial)
+                        self.assertEqual([g["id"] for g in env["ES_AI_SHOWN"]], ["mi"])
+                        self.assertEqual(env["ES_AI_SHOWN"][0]["tag"], "mi normal " + (initial or "pioneer"))
+                        self.assertEqual(env["ES_AI_CAMEO_NEARBY"]["un_room"], [])
+                        self.assertEqual(set(env["ES_AI_SCENE_ABSENT"]["un_room"]), {"sl", "un"})
+                        env["es_ai_apply_actions"]({}, "давай останемся наедине")
+                        self.assertEqual(env["ES_AI_DRESS"][0], initial)
 
     def test_night_home_draw_once_and_cover_cancels(self):
         homes = {"sl": "sl_room", "mz": "sl_room", "un": "un_room", "mi": "un_room",
@@ -416,7 +454,7 @@ class ClothingTests(unittest.TestCase):
                 out = env["cameo"]({"character": "sl", "location_id": "sl_room", "dress": "swim",
                                     "dress_reason": "night_home", "player_text": REQUEST_CASES[0][0]})
                 self.assertEqual(out["dress"], "cover")
-                self.assertIn("AUTHORITATIVE CURRENT CLOTHING: pioneer", captured[-1])
+                self.assertIn("AUTHORITATIVE CURRENT CLOTHING: swim", captured[-1])
 
     def test_payload_reports_clothing_and_asset_fallback(self):
         for root in ROOTS:
@@ -469,7 +507,7 @@ class ClothingTests(unittest.TestCase):
                 for cid in ("dv", "us"):
                     env["es_ai_try_cameo"]("sl", "Hi", {"cameo": [cid]})
                 self.assertEqual([g["dress"] for g in env["ES_AI_SHOWN"] if g.get("cameo")],
-                                 ["swim", "swim"])
+                                 ["pioneer" if g.get("cover_choice") else "swim" for g in env["ES_AI_SHOWN"] if g.get("cameo")])
 
     def test_travel_preserves_company_and_resets_only_destination_dress(self):
         for root in ROOTS:
@@ -828,7 +866,7 @@ class ClothingTests(unittest.TestCase):
                     request = {"character": "us", "location": "library", "location_id": "library"}
                     request.update(payload)
                     self.assertEqual(env["cameo"](request).get("dress"), expected)
-                self.assertIn("AUTHORITATIVE CURRENT CLOTHING: pioneer", captured[-1])
+                self.assertIn("AUTHORITATIVE CURRENT CLOTHING: swim", captured[-1])
                 env["cameo"]({"character": "us", "location_id": "dv_room", "dress": "swim",
                               "dress_reason": "night_home"})
                 self.assertIn("sleepwear visual proxy", captured[-1])

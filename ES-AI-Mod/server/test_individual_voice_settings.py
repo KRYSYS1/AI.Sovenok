@@ -59,7 +59,7 @@ class IndividualVoiceSettingsTests(unittest.TestCase):
         env.update(voice_targets=[("un", "Lena"), ("el", "Elektronik"), ("sl", "Slavya")],
                    individual_rows={}, individual_providers={"auto": "Общий провайдер", "off": "Выключено",
                    "edge": "edge-tts", "openai": "OpenAI"}, tk=types.SimpleNamespace(StringVar=Var),
-                   MANAGED=[], I18N_WIDGETS=[], lookup_icons=set(), canvas=Mock(),
+                   family="Arial", MANAGED=[], I18N_WIDGETS=[], lookup_icons=set(), canvas=Mock(),
                    lookup=dict(token=0, top=None, lb=None, sb=None, loading=False), Field=Control)
         def chip(*args, **kwargs):
             control = Control(*args, **kwargs)

@@ -31,6 +31,9 @@ EN = {
     u"Показывать время": u"Show time",
     u"Автоматически менять собеседника": u"Automatically switch conversation partner",
     u"Сюжетные события": u"Story Events",
+    u"Сюжетные выборы": u"Story choices",
+    u"Небольшие истории по контексту. Выборы: 2-4 варианта и свой ответ. Можно отказаться.":
+        u"Small contextual stories. Choices: 2-4 options and your own answer. You can decline.",
     u"Редко": u"Occasional",
     u"Умеренно": u"Moderate",
     u"Активно": u"Frequent",

@@ -58,7 +58,7 @@ class PlayerIdentityTests(unittest.TestCase):
             self.assertIn("custom persona", block)
             rules = store.reply_rules(store.get_character("us"))
             self.assertNotRegex(rules, "Сем[её]|Semyon")
-            self.assertIn("несовершеннолетний", rules)
+            self.assertIn("общение только платоническое", rules)
             self.assertIn("semen_room", rules)
             store._data = None
             opener = mock_open(read_data=json.dumps({"player": {"name": "KRYSYS"}, "characters": []}))
@@ -90,7 +90,7 @@ class PlayerIdentityTests(unittest.TestCase):
                     prompt = llm.chat.call_args.args[0][0]["content"]
                     self.assertIn("игрок по имени KRYSYS", prompt)
                     self.assertNotRegex(prompt, "Сем[её]|Semyon")
-                    self.assertIn("несовершеннолетний", prompt)
+                    self.assertIn("общение только платоническое", prompt)
                 self.assertTrue(env["initiative"]({"character": "us"})["ok"])
                 self.assertIn("KRYSYS", llm.chat.call_args.args[0][0]["content"])
                 self.assertNotRegex(str(llm.chat.call_args.args), "Сем[её]|Semyon")

@@ -118,7 +118,9 @@ label es_ai_pick:
     hide screen es_ai_thinking
 
     if _greet is not None and _greet.get("reply"):
-        $ es_ai_say_girl(es_ai_char_id, _greet.get("reply"), _greet.get("emotion"))
+        $ es_ai_say_girl(es_ai_char_id, _greet.get("reply"), _greet.get("emotion"), story_ack=_greet.get("story_ack"), choices=_greet.get("choices"))
+        $ es_ai_delivery_flush()
+        $ es_ai_story_choices_menu()
     else:
         $ es_ai_say_girl(es_ai_char_id, ES_AI_INTROS.get(es_ai_char_id, u"Привет, Семён."), "normal", False)
 
@@ -201,10 +203,14 @@ label es_ai_chat_loop:
             jump es_ai_leave
 
 label es_ai_chat_input:
+    if ES_AI_LOC_LAST_CHAR[0] is None:
+        jump es_ai_pick
     $ es_ai_clock_sync()
     $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
     $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
-    $ _inp = renpy.input(u"Что скажешь %s? (пустой Enter — меню)" % es_ai_who_name,
+    $ _inp = es_ai_story_input_take()
+    if _inp is None:
+        $ _inp = renpy.input(u"Что скажешь %s? (пустой Enter — меню)" % es_ai_who_name,
                           default=es_ai_voice_text, length=200).strip()
     $ es_ai_voice_text = ""
 
@@ -220,14 +226,22 @@ label es_ai_chat_input:
         jump es_ai_chat_input
 
     $ _clock_lines = ES_AI_CLOCK["lines"]
+    if _res.get("departure"):
+        $ es_ai_say_girl(es_ai_char_id, _res["departure"].get("reply", ""), _res["departure"].get("emotion"), wait_voice=True)
+        $ es_ai_delivery_flush()
     $ es_ai_apply_actions(_res, _inp)
     $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
     $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
     if not _res.get("suppress_main_reply", False):
-        $ es_ai_say_girl(es_ai_char_id, _res.get("reply", ""), _res.get("emotion"))
-    $ es_ai_try_cameo(es_ai_char_id, _inp, _res)
+        $ es_ai_say_girl(es_ai_char_id, _res.get("reply", ""), _res.get("emotion"), story_ack=_res.get("story_ack"), choices=_res.get("choices"), wait_voice=_res.get("end_conversation") is True)
+    if not _res.get("end_conversation", False):
+        $ es_ai_try_cameo(es_ai_char_id, _inp, _res)
     $ es_ai_clock_complete(_clock_lines, _res.get("_clock_revision"))
     $ es_ai_delivery_flush()
+    if _res.get("end_conversation") is True:
+        $ es_ai_detach_primary()
+        jump es_ai_pick
+    $ es_ai_story_choices_menu()
     jump es_ai_chat_input
 
 ################################################################################
@@ -273,10 +287,11 @@ label es_ai_chat_initiative:
         $ es_ai_char_id = ES_AI_LOC_LAST_CHAR[0]
         $ es_ai_who_name = es_ai_char_name(es_ai_char_id)
         if not _ini.get("suppress_main_reply", False):
-            $ es_ai_say_girl(es_ai_char_id, _ini.get("reply", ""), _ini.get("emotion"))
+            $ es_ai_say_girl(es_ai_char_id, _ini.get("reply", ""), _ini.get("emotion"), story_ack=_ini.get("story_ack"), choices=_ini.get("choices"))
         $ es_ai_try_cameo(es_ai_char_id, "", _ini)
         $ es_ai_clock_complete(_clock_lines, _ini.get("_clock_revision"))
         $ es_ai_delivery_flush()
+        $ es_ai_story_choices_menu()
 
     jump es_ai_chat_input
 

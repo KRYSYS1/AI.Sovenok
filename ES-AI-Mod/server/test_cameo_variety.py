@@ -24,7 +24,7 @@ def cameo_environment(path):
     for block in re.split(r"^init [^\n]*python:\s*\n", source, flags=re.M)[1:]:
         for node in ast.parse(textwrap.dedent(block)).body:
             if isinstance(node, ast.FunctionDef) and node.name in {
-                    "es_ai_maybe_cameo", "es_ai_scene_snapshot", "es_ai_cameo_capacity",
+                    "es_ai_maybe_cameo", "es_ai_scene_snapshot", "es_ai_actual_outfits", "es_ai_cameo_capacity",
                     "es_ai_cameo_group_size"}:
                 nodes.append(node)
             elif isinstance(node, ast.Assign) and any(

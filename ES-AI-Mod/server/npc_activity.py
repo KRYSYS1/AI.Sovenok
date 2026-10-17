@@ -67,6 +67,9 @@ def authoritative(scene, clock=None, enabled=True):
     for cid in scene.get("present", []) + scene.get("nearby", []):
         if cid in activity:
             activity[cid] = dict(location=origin, task="present", status="available", eta_turns=0, recorded=True)
+    for cid in scene.get("absent", []):
+        if cid in activity and activity[cid].get("location") == origin and cid not in scene.get("present", []) + scene.get("nearby", []):
+            activity[cid] = dict(location=None, task="away", status="busy", eta_turns=2, recorded=True)
     scene["activity"] = activity
     return scene
 

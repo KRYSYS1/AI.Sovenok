@@ -41,6 +41,52 @@ init 10 python:
     # ---------------------------------------------------------- запросы ----
 
     ES_AI_STORY_ACKS = []
+    ES_AI_STORY_INPUT = {"pending": None, "selection": None, "choice": None}
+
+    def es_ai_story_choices_record(value):
+        if not isinstance(value, _es_ai_cameo_builtins.dict):
+            return
+        options = value.get("options")
+        if (not isinstance(value.get("token"), basestring) or len(value["token"]) != 36
+                or not isinstance(options, _es_ai_cameo_builtins.list) or not 2 <= len(options) <= 4):
+            return
+        ids, texts = set(), set()
+        for option in options:
+            if not isinstance(option, _es_ai_cameo_builtins.dict):
+                return
+            cid, text = option.get("id"), option.get("text")
+            if (not isinstance(cid, basestring) or not 1 <= len(cid) <= 40
+                    or not isinstance(text, basestring) or not text.strip() or len(text) > 160
+                    or any(c in text for c in u"[]{}<>\n\r\t") or cid in ids or text.lower() in texts):
+                return
+            ids.add(cid)
+            texts.add(text.lower())
+        ES_AI_STORY_INPUT["choice"] = value
+
+    def es_ai_story_choices_menu():
+        value = ES_AI_STORY_INPUT.pop("choice", None)
+        ES_AI_STORY_INPUT["choice"] = None
+        if not value or not ES_AI_FREE_SCENE[0]:
+            return
+        ES_AI_STORY_INPUT["pending"] = None
+        ES_AI_STORY_INPUT["selection"] = None
+        # None is a menu caption; Return(None) can open the main menu in mod context.
+        custom = ("custom",)
+        captions = [(es_ai_sanitize_text(o["text"]), o["id"]) for o in value["options"]]
+        captions.append((u"\u041e\u0442\u0432\u0435\u0442\u0438\u0442\u044c \u0441\u0430\u043c\u043e\u043c\u0443", custom))
+        selected = renpy.display_menu(captions, interact=True, screen="es_ai_story_choice")
+        if selected == custom:
+            return
+        for option in value["options"]:
+            if option["id"] == selected:
+                ES_AI_STORY_INPUT["pending"] = option["text"]
+                ES_AI_STORY_INPUT["selection"] = dict(token=value["token"], version=value["version"], id=selected)
+                break
+
+    def es_ai_story_input_take():
+        text = ES_AI_STORY_INPUT.get("pending")
+        ES_AI_STORY_INPUT["pending"] = None
+        return text
 
     def es_ai_story_ack_record(ack):
         import time
@@ -75,6 +121,11 @@ init 10 python:
                    "clock": es_ai_clock_snapshot()}
         payload["public_events"] = es_ai_public_snapshot()
         payload["story_acks"] = es_ai_story_ack_snapshot()
+        selected = ES_AI_STORY_INPUT.get("selection")
+        ES_AI_STORY_INPUT["selection"] = None
+        ES_AI_STORY_INPUT["choice"] = None
+        if selected:
+            payload["story_choice"] = selected
         if ES_AI_FREE_SCENE[0]:
             payload["location"] = es_ai_location_context()
             payload["scene"] = es_ai_scene_snapshot(char_id)
@@ -469,7 +520,7 @@ init 10 python:
         set_es_ai_error(u"")
         return job.result or ""
 
-    def es_ai_say_girl(char_id, text, emotion=None, voice=True):
+    def es_ai_say_girl(char_id, text, emotion=None, voice=True, story_ack=None, choices=None, wait_voice=False):
         """Показ реплики героини: спрайт по эмоции + текст + озвучка.
 
         Текст уже без эмоции в скобках; теги { } [ ] экранируются."""
@@ -493,9 +544,20 @@ init 10 python:
         safe = es_ai_sanitize_text(raw)
         es_ai_internal_speaking[0] = True
         try:
-            es_ai_delivery_say(es_ai_speakers[char_id], safe, char_id, raw)
+            if choices is None:
+                es_ai_delivery_say(es_ai_speakers[char_id], safe, char_id, raw, story_ack)
+            else:
+                es_ai_delivery_say(es_ai_speakers[char_id], safe, char_id, raw, story_ack, choices)
         finally:
             es_ai_internal_speaking[0] = False
+        if wait_voice and voice and persistent.es_ai_tts:
+            import time
+            deadline = time.time() + 65
+            while persistent.es_ai_tts and time.time() < deadline:
+                es_ai_tts_pump()
+                if not (es_ai_tts_jobs or es_ai_tts_queue or renpy.music.is_playing(channel=es_ai_tts_channel())):
+                    break
+                renpy.pause(0.05)
 
     # Последняя ошибка сервера для показа в диалогах (строка, не список:
     # Ren'Py-интерполяция [es_ai_last_error] в тексте)

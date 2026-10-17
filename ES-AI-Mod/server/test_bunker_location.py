@@ -37,11 +37,12 @@ def load_selected(path, names, env=None, renpy=False):
 
 
 def locations(client):
+    env = load_selected(client / "es_ai_cameo.rpy", {"es_ai_clothing_cover_choice"}, {"unicode": str}, renpy=True)
     return load_selected(client / "es_ai_locations.rpy", {
         "ES_AI_LOCATIONS", "ES_AI_LOCATION_INDEX", "ES_AI_MAP", "ES_AI_LOC_ALIASES",
         "ES_AI_MOVE_WORDS", "es_ai_location_id", "es_ai_location_from_dialog",
         "es_ai_loc_bg", "es_ai_neighbors_text", "es_ai_location_context", "es_ai_location",
-        "es_ai_apply_actions"}, {"unicode": str}, renpy=True)
+        "es_ai_apply_actions"}, env, renpy=True)
 
 
 class BunkerLocationTests(unittest.TestCase):

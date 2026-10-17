@@ -147,17 +147,28 @@ def random_emotion_ru(char_id):
 def reply_rules(ch):
     vocab = sorted(_EMOTIONS.get(ch["id"], []))
     guard = ""
-    try:
-        _age = int(ch.get("age") or 99)
-    except (TypeError, ValueError):
-        _age = 99
-    if _age < 18:
+    _age = ch.get("age")
+    from clothing_policy import adult_romance_allowed
+    if not adult_romance_allowed(ch["id"], _age):
         guard = (
-            "0. ВАЖНО (приоритет над всем): ты несовершеннолетний ребёнок. Любые "
+            "0. ВАЖНО: сохраняй свою личность и возраст; общение только платоническое. Любые "
             "романтические, интимные, флиртовые или сексуальные темы для тебя недопустимы "
             "и неинтересны. Если игрок заигрывает — реагируй как ребёнок: не понимаешь, "
             "«фу», дразнишься, меняешь тему на игры и шалости. Никогда не переодевайся в "
             "купальник «для настроения» — только чтобы искупаться, без всякого подтекста.\n"
+        )
+    else:
+        guard = (
+            "ADULT NONEXPLICIT ROMANCE: Preserve your original personality, speech and pace. "
+            "Ordinary compliments, flirting, walks, dates, holding hands, hugs and kisses are not sexual requests. "
+            "When interest is reciprocal and there is no current conflict, respond warmly and naturally; "
+            "do not invent repeated scripted 'not ready' barriers or lectures. Shyness can coexist with warmth. "
+            "No compulsory consent: you may decline. An explicit no stays no; pressure after a no is not a reason to agree. "
+            "If you accept an ordinary alternative, discuss that alternative; do not repeat an earlier refusal "
+            "unprompted on the next unrelated message. Never claim the player has already acted or consented. "
+            "Affection does not imply clothing consent. Ordinary voluntary swimsuit choices are separate, "
+            "subject to the clothing rules, without nudity, body descriptions or sexual acts. "
+            "This guidance does not override provider safety policies or authorize sexual content.\n"
         )
     return guard + (
         "ПРАВИЛА ОТВЕТА:\n"
@@ -196,8 +207,16 @@ def reply_rules(ch):
         "текущую романтическую инициативу игрока; поцелуй или объятие сами по себе не требуют переодевания. Если "
         "стало холодно, разговор серьёзный или игрок просит одеться — добавь в конце "
         "[action:dress:форма]. Если решили искупаться/позагорать — [action:dress:купальник]. "
-        "В романтической вечерней сцене или наедине в комнате [action:dress:купальник] уместен, "
-        "только если это естественно по настроению. Без причины наряд не меняй. "
+        "Добровольный обычный купальник в романтической сцене допустим независимо от времени суток "
+        "только при подтверждённом структурированном возрасте >=18 (никогда us/uv), текущей "
+        "инициативе игрока именно к тебе, взаимном согласии и фактически уединённой текущей сцене. "
+        "Ты должна сама положительно выбрать одежду словами «надену купальник» или «переоденусь в бикини» "
+        "и добавить [action:dress:swim]. Объятия, приватность, старая персона и чужая романтика "
+        "сами по себе не меняют одежду. В людном автобусе, библиотеке или столовой это неуместно. "
+        "Отказ переодеваться сохраняется, даже при повторной просьбе; более поздний добровольный выбор одежды возможен. "
+        "Если сама решила остаться в форме или идти без переодеваний, добавь [action:dress:cover]; "
+        "дневной пляжный наряд по умолчанию не отменяет этот выбор. Никакой наготы, "
+        "описаний тела или сексуальных действий; это только обычная смена костюма. Без причины наряд не меняй. "
         "Теги читаются игрой молча — вслух их не произноси. "
         "Ordinary non-sexual party dresses exist only for un/sl/us/mt, including neutral clothing for us. "
         "Use [action:dress:dress] for an explicit dress request or current participation/preparation in a concert, disco, ball or celebration. "

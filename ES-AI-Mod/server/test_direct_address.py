@@ -186,7 +186,7 @@ class DirectAddressTests(unittest.TestCase):
                 self.assertNotIn("goto", out)
                 self.assertEqual(out["travel_with"], [])
             out = env["chat"]({"character": "un", "text": "где пляж", "scene": movement_scene})
-            self.assertEqual(out["goto"], "beach", "Model-generated goto remains unchanged")
+            self.assertNotIn("goto", out, "A place question cannot authorize model-generated travel")
             response = ["(нормально) Я подожду. [action:cameo:sl] [action:goto:library]"]
 
             def fake_chat(messages, **kwargs):
@@ -476,9 +476,9 @@ class DirectAddressTests(unittest.TestCase):
                 # Only execute Python init blocks; no Ren'Py, settings or network access.
                 blocks = re.split(r"^init [^\n]*python:\s*\n", source, flags=re.M)[1:]
                 trees = [ast.parse(textwrap.dedent(block)) for block in blocks]
-                names = {"es_ai_scene_snapshot", "es_ai_try_cameo", "es_ai_maybe_cameo",
+                names = {"es_ai_scene_snapshot", "es_ai_actual_outfits", "es_ai_try_cameo", "es_ai_maybe_cameo",
                           "es_ai_cameo_capacity", "es_ai_cameo_group_size", "es_ai_cameo_deliver_group",
-                          "es_ai_recent_push"}
+                          "es_ai_recent_push", "es_ai_clothing_cover_choice"}
                 nodes = [n for tree in trees for n in tree.body if
                          (isinstance(n, ast.FunctionDef) and n.name in names) or
                          (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and
@@ -492,7 +492,7 @@ class DirectAddressTests(unittest.TestCase):
                 logs = []
                 enabled = [True]
                 env = {"_es_ai_cameo_builtins": builtins, "_es_random": random,
-                       "basestring": str, "long": int, "ES_AI_CHARS": [(c["id"], c["name"], "") for c in roster],
+                       "basestring": str, "unicode": str, "long": int, "ES_AI_CHARS": [(c["id"], c["name"], "") for c in roster],
                        "ES_AI_SHOWN": shown, "ES_AI_LOC_CUR": ["beach"], "ES_AI_CAMEO_CD": [0],
                          "ES_AI_CAMEO_COOLDOWN": 5, "ES_AI_CAMEO_ACTIVE": [], "ES_AI_CAMEO_NEARBY": {},
                          "ES_AI_LOC_OWNERS": {}, "ES_AI_CAMEO_PAIRS": [], "ES_AI_CAMEO_PLAYER_TEXT": [""],
@@ -612,6 +612,7 @@ class DirectAddressTests(unittest.TestCase):
             block = source.split('    $ es_ai_apply_actions(_res, _inp)', 1)[1].split('    jump es_ai_chat_input', 1)[0]
             block = '    $ es_ai_apply_actions(_res, _inp)' + block
             code = textwrap.dedent(re.sub(r"(?m)^(\s*)\$ ", r"\1", block))
+            code = re.sub(r"(?m)^(\s*)jump es_ai_pick$", r"\1raise AssertionError('unexpected detach')", code)
             for result, expected in (({"reply": "", "suppress_main_reply": True}, ["actions", "cameo"]),
                     ({"reply": "normal"}, ["actions", "say", "cameo"]),
                     ({"reply": "blocked", "cameo_requested": True}, ["actions", "say", "cameo"])):
@@ -620,9 +621,10 @@ class DirectAddressTests(unittest.TestCase):
                     env = {"_res": result, "_inp": "player line", "es_ai_char_id": "un",
                            "ES_AI_LOC_LAST_CHAR": ["sl"], "es_ai_char_name": lambda cid: cid,
                            "_clock_lines": 0, "es_ai_clock_complete": lambda *a: None,
-                           "es_ai_delivery_flush": lambda: None,
+                            "es_ai_delivery_flush": lambda: None,
+                            "es_ai_story_choices_menu": lambda: None,
                            "es_ai_apply_actions": lambda *a: calls.append("actions"),
-                           "es_ai_say_girl": lambda *a: calls.append("say"),
+                            "es_ai_say_girl": lambda *a, **kw: calls.append("say"),
                            "es_ai_try_cameo": lambda *a: calls.append("cameo")}
                     exec(compile(code, str(root / "es_ai_chat.rpy"), "exec"), env)
                     self.assertEqual(calls, expected)

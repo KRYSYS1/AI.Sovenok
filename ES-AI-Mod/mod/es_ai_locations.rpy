@@ -403,9 +403,8 @@ init -10 python:
     ES_AI_DRESS_COVER_WORDS = (u"замёрзл", u"замерзл", u"холодно", u"зябко", u"оденься",
         u"переоденься обратно", u"надень форму", u"в форму", u"прикройся", u"простуд",
         u"стесняюсь", u"неудобно так", u"серьёзный разговор", u"по-серьёзному")
-    # Романтический/интимный настрой -> купальник, но только в романтических локациях
-    # (комнаты, у воды) или вечером/ночью.
-    ES_AI_DRESS_ROMANTIC_WORDS = (u"поцелу", u"обним", u"люблю тебя", u"романти", u"наедине",
+    # Cameo mood detection only; these words never authorize clothing changes.
+    ES_AI_DRESS_ROMANTIC_WORDS = (u"поцелу", u"обним", u"люблю тебя", u"романти",
         u"прижал", u"прижа", u"свидание", u"только мы вдвоём", u"нежно", u"ласков", u"страст")
 
 
@@ -418,6 +417,7 @@ init -10 python:
         es_ai_girls_reset()
 
     def es_ai_girls_reset():
+        globals().get("ES_AI_SCENE_ABSENT", {}).clear()
         globals().get("ES_AI_ACTIVITY_PENDING", {}).clear()
         ES_AI_DRESS[0] = None
         ES_AI_LOC_LAST_CHAR[0] = None
@@ -523,6 +523,8 @@ init -10 python:
         saved = es_ai_cameo_take_nearby(char_id)
         switching = previous is None or previous["id"] != char_id
         if switching:
+            for g in ES_AI_SHOWN:
+                g.pop("travel_party", None)
             # Clothing and recent romantic context belong to the former primary.
             ES_AI_CAMEO_PLAYER_TEXT[0] = u""
             ES_AI_RECENT_LINES[:] = []
@@ -677,18 +679,39 @@ init -10 python:
             answer = unicode(reply or u"").lower()
         except Exception:
             return None
-        combined = player + u" " + answer
-        # Questions and refusals must not become travel through a model reply.
-        if re.search(u"\\b(?:не|нет|not|no|don't|where|где|зачем)\\b|[?]", player):
+        # Only current player clauses authorize travel; NPC prose is not an action.
+        if re.search(u"[?\"'«»„“”]", player, re.UNICODE):
             return None
-        if not any(word in combined for word in ES_AI_MOVE_WORDS):
-            return None
-        for loc_id, aliases in ES_AI_LOC_ALIASES:
-            for alias in aliases:
-                if alias in combined and (loc_id != "bunker" or re.search(
-                        r"(?<!\w)" + re.escape(alias) + r"(?!\w)", combined, re.UNICODE)):
-                    return loc_id
+        for clause in re.split(u"[.!;\\n]|,\\s*|\\b(?:но|а)\\s+", player, flags=re.UNICODE):
+            if re.search(u"\\b(?:не|нет|если|бы|может|думал|сказал[аи]?|говорит|вчера|раньше)\\b", clause, re.UNICODE):
+                continue
+            if not re.match(u"\\s*(?:я\\s+)?(?:пошли(?:те)?|пойд[её]м(?:те)?|пойду|пош[её]л|ид[её]м|схожу|сходим|отправимся|перейд[её]м|давай(?:те)?|хочу\\s+(?:пойти|сходить))\\b", clause, re.UNICODE):
+                continue
+            return es_ai_location_id(clause)
         return None
+
+    def es_ai_detach_primary():
+        global es_ai_char_id, es_ai_who_name, es_ai_voice_text
+        # No requests are made in this transient state: the label jumps to es_ai_pick.
+        for g in list(ES_AI_SHOWN):
+            es_ai_cameo_park(g["id"], announce=False)
+            renpy.hide(g["id"])
+        ES_AI_SHOWN[:] = []
+        ES_AI_CAMEO_ACTIVE[:] = []
+        previous, origin = ES_AI_LOC_LAST_CHAR[0], ES_AI_LOC_CUR[0]
+        ES_AI_CAMEO_NEARBY[origin] = [g for g in ES_AI_CAMEO_NEARBY.get(origin, []) if g["id"] != previous]
+        absent = ES_AI_SCENE_ABSENT.setdefault(origin, [])
+        if previous and previous not in absent:
+            absent.append(previous)
+        globals().get("ES_AI_ACTIVITY_PENDING", {}).clear()
+        for key in globals().get("ES_AI_STORY_INPUT", {}):
+            ES_AI_STORY_INPUT[key] = None
+        ES_AI_LOC_LAST_CHAR[0] = None
+        ES_AI_LOC_LAST_EMO[0] = "normal"
+        ES_AI_DRESS[0] = None
+        ES_AI_RECENT_LINES[:] = []
+        ES_AI_CAMEO_PLAYER_TEXT[0] = u""
+        es_ai_char_id, es_ai_who_name, es_ai_voice_text = None, u"", u""
 
     def es_ai_apply_actions(res, player_text=None):
         """Применить goto/time; при отсутствии goto понять переход из диалога."""
@@ -696,11 +719,48 @@ init -10 python:
         if not hasattr(res, "get"):
             es_ai_log("location action skipped: response has no get()")
             return
+        if res.get("end_conversation") is True:
+            return
         es_ai_log("live-chain-20261011 apply before=%s request=%r current=%r response=%r" %
                   (ES_AI_LOC_LAST_CHAR[0], res.get("_request_trace"),
                    es_ai_request_trace(ES_AI_LOC_LAST_CHAR[0], player_text) if player_text is not None else None,
                    [(key, res.get(key)) for key in ("id", "switch_primary", "goto", "dress", "movement_blocked", "travel_all", "travel_with", "cameo_aside")]))
         goto_raw = res.get("goto")
+        visit = res.get("visit_primary")
+        if visit:
+            st = es_ai_read_cameo_settings()
+            target = visit.get("id") if isinstance(visit, _es_ai_cameo_builtins.dict) else None
+            destination = visit.get("location_id") if target else None
+            homes = {"el": "club_room", "sh": "club_room", "cs": "aidpost_inside",
+                     "mz": "sl_room", "sl": "sl_room", "un": "un_room", "mi": "un_room",
+                     "dv": "dv_room", "us": "dv_room", "mt": "mt_room"}
+            elsewhere = any(g["id"] == target for loc, records in ES_AI_CAMEO_NEARBY.items()
+                            if loc != destination for g in records)
+            if (st.get("scene_auto_primary") is not True or not ES_AI_FREE_SCENE[0]
+                    or not es_ai_cameo_on() or not player_text or res.get("movement_blocked")
+                    or target not in [c[0] for c in ES_AI_CHARS] or not destination
+                    or homes.get(target) != destination or es_ai_location_id(goto_raw) != destination
+                    or target == ES_AI_LOC_LAST_CHAR[0] or elsewhere):
+                res.update(movement_blocked=True, suppress_main_reply=True, cameo=[], cameo_requested=True)
+                es_ai_log("destination visit rejected: invalid or unavailable host")
+                if res.get("farewell_primary") == ES_AI_LOC_LAST_CHAR[0]:
+                    res["end_conversation"] = True
+                renpy.notify(u"Переход к персонажу недоступен. Выберите собеседника.")
+                return
+            previous, origin = ES_AI_LOC_LAST_CHAR[0], ES_AI_LOC_CUR[0]
+            # Park the old primary before travel; never carry it as a placeholder.
+            for g in ES_AI_SHOWN:
+                if g["id"] == previous:
+                    g.update(cameo=True, dress=es_ai_current_dress(),
+                             dress_reason="player" if ES_AI_DRESS[0] else "location",
+                             dress_location=origin)
+            es_ai_cameo_park(previous, announce=False)
+            es_ai_set_location(destination, cameo_arrive=False, travel_with=[])
+            es_ai_cameo_enter(target, "normal", stay=True)
+            es_ai_girl_enter(target, res.get("emotion") or "normal")
+            es_ai_log("destination visit arrived: primary=%s origin=%s destination=%s parked=%s" %
+                      (target, origin, destination, previous))
+            return
         switch = res.get("switch_primary")
         if switch:
             local = set(g["id"] for g in ES_AI_SHOWN) | set(
@@ -715,12 +775,23 @@ init -10 python:
                 res["cameo"] = []
                 res["cameo_requested"] = True
                 es_ai_log("automatic primary rejected: invalid local transition")
+                if res.get("farewell_primary") == ES_AI_LOC_LAST_CHAR[0]:
+                    res["end_conversation"] = True
+                renpy.notify(u"Смена собеседника недоступна. Выберите персонажа.")
                 return
             previous = ES_AI_LOC_LAST_CHAR[0]
             origin = ES_AI_LOC_CUR[0]
             es_ai_girl_enter(switch, "normal")
             es_ai_char_id = switch
-            es_ai_cameo_park(previous, announce=False)
+            if previous not in res.get("travel_with", []):
+                es_ai_cameo_park(previous, announce=False)
+            elif previous in local and not any(g["id"] == previous for g in ES_AI_SHOWN):
+                es_ai_cameo_enter(previous, "normal", stay=True)
+            if previous in res.get("npc_depart", []):
+                es_ai_cameo_leave(previous)
+                absent = ES_AI_SCENE_ABSENT.setdefault(origin, [])
+                if previous not in absent:
+                    absent.append(previous)
             es_ai_log("live-bind-20261011 primary before=%s after=%s origin=%s shown=%r parked=%r" %
                       (previous, ES_AI_LOC_LAST_CHAR[0], origin,
                        [g["id"] for g in ES_AI_SHOWN][:16],
@@ -730,12 +801,42 @@ init -10 python:
             for cid in aside:
                 es_ai_cameo_park(cid, announce=False)
         loc_id = es_ai_location_id(goto_raw)
-        if not loc_id and not res.get("movement_blocked"):
+        departures = res.get("scene_depart", [])
+        if res.get("privacy") and not res.get("movement_blocked") and isinstance(departures, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)):
+            local = set(g["id"] for g in ES_AI_SHOWN) | set(g["id"] for g in ES_AI_CAMEO_NEARBY.get(ES_AI_LOC_CUR[0], []))
+            known = set(c[0] for c in ES_AI_CHARS) - {ES_AI_LOC_LAST_CHAR[0]}
+            for cid in departures:
+                if not isinstance(cid, basestring) or cid not in local or cid not in known:
+                    continue
+                # Preserve records elsewhere; departure establishes no destination.
+                ES_AI_CAMEO_NEARBY[ES_AI_LOC_CUR[0]] = [g for g in ES_AI_CAMEO_NEARBY.get(ES_AI_LOC_CUR[0], []) if g["id"] != cid]
+                es_ai_cameo_unregister(cid)
+                ES_AI_SHOWN[:] = [g for g in ES_AI_SHOWN if g["id"] != cid]
+                globals().get("ES_AI_ACTIVITY_PENDING", {}).pop(cid, None)
+                absent = ES_AI_SCENE_ABSENT.setdefault(ES_AI_LOC_CUR[0], [])
+                if cid not in absent:
+                    absent.append(cid)
+                renpy.hide(cid)
+            es_ai_refresh_girls()
+        if not loc_id and not res.get("movement_blocked") and not res.get("player_travel_blocked") and not switch and not res.get("privacy"):
             loc_id = es_ai_location_from_dialog(player_text, res.get("reply", ""))
-        if res.get("movement_blocked"):
+        if res.get("movement_blocked") or res.get("player_travel_blocked"):
             loc_id = None
+        party = res.get("travel_party")
+        if isinstance(party, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)):
+            for g in ES_AI_SHOWN:
+                g.pop("travel_party", None)
+                if g.get("cameo") and g["id"] in party:
+                    g["travel_party"] = True
         es_ai_log("location action: goto=%r fallback=%r current=%s" %
                   (goto_raw, loc_id, ES_AI_LOC_CUR[0]))
+        # Resolve the current speaker's own choice before any destination render.
+        cover_choice = es_ai_clothing_cover_choice(res.get("reply", ""), ES_AI_LOC_LAST_CHAR[0])
+        if cover_choice:
+            for record in ES_AI_SHOWN:
+                if record["id"] == ES_AI_LOC_LAST_CHAR[0]:
+                    record.update(cover_choice=True, dress_reason="cover_choice", dress_location=ES_AI_LOC_CUR[0])
+            ES_AI_DRESS[0] = "cover"
         if loc_id and loc_id != ES_AI_LOC_CUR[0]:
             requested = res.get("cameo", [])
             eligible = set(c[0] for c in ES_AI_CHARS) - {ES_AI_LOC_LAST_CHAR[0]}
@@ -745,25 +846,42 @@ init -10 python:
             leaving = res.get("cameo_leave", [])
             farewell = isinstance(leaving, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)) and bool(leaving)
             es_ai_set_location(loc_id, ES_AI_LOC_LAST_CHAR[0],
-                               ES_AI_LOC_LAST_EMO[0], cameo_arrive=not (explicit_arrival or farewell or switch),
+                               ES_AI_LOC_LAST_EMO[0], cameo_arrive=not (explicit_arrival or farewell or switch or res.get("privacy")),
                                 travel_all=res.get("travel_all") is True,
-                                travel_with=res.get("travel_with"))
+                                 travel_with=res.get("travel_with"), keep_primary_clothes=cover_choice)
             es_ai_log("location changed: %s" % loc_id)
         tm = res.get("time")
         if tm and not ES_AI_CLOCK["enabled"]:
             es_ai_set_time(tm)
+        if res.get("privacy"):
+            return
         # Наряд по контексту: сначала явный тег сервера [action:dress:...],
         # иначе — клиентский разбор реплик и настроения. Делается ПОСЛЕ смены
         # локации, чтобы учитывать базовый наряд уже нового места.
         if not player_text and not res.get("reply") and not res.get("dress"):
+            return
+        if cover_choice:
+            ES_AI_CAMEO_PLAYER_TEXT[0] = u""
+            es_ai_refresh_girls()
+            return
+        if es_ai_clothing_refused(res.get("reply", "")):
+            ES_AI_CAMEO_PLAYER_TEXT[0] = u""
             return
         es_ai_apply_party_context(player_text, res.get("reply", ""))
         active = ES_AI_LOC_LAST_CHAR[0]
         request = es_ai_cameo_clothing_request(active, player_text, unnamed=True)
         other_request = any(es_ai_cameo_clothing_request(cid, player_text) for cid, _, _ in ES_AI_CHARS if cid != active)
         dress_sig = request or (None if other_request else res.get("dress"))
+        opted_out = any(g["id"] == active and g.get("cover_choice") for g in ES_AI_SHOWN)
+        if opted_out and not request:
+            # A location tag or old conversation is not a new voluntary choice.
+            import re
+            positive = re.search(u"\\b(?:надену|переоденусь)\\s+(?:в\\s+)?(?:купальник|бикини|платье|спортивн\\w*)\\b", unicode(res.get("reply", "")).lower(), re.UNICODE)
+            if not positive:
+                dress_sig = "cover"
         night_beach = es_ai_location().get("id") == "beach" and es_ai_clothing_night()
-        romantic_swim = night_beach and es_ai_beach_romantic_clothing(player_text, res.get("reply", ""))
+        dress_sig = {u"бикини": "swim", u"купальник": "swim", "bikini": "swim", "swimsuit": "swim"}.get(dress_sig, dress_sig) if isinstance(dress_sig, basestring) else None
+        romantic_swim = dress_sig == "swim" and not request and not other_request and es_ai_beach_romantic_clothing(player_text, res.get("reply", ""))
         if night_beach and not request and not other_request and not romantic_swim and es_ai_no_swimming(player_text):
             dress_sig = "cover"
         if dress_sig in ("swim", u"купальник", u"купаться") and not (
@@ -780,6 +898,10 @@ init -10 python:
             dress_sig = None  # A model echo of the location default is not player authorization.
         if dress_sig:
             es_ai_set_dress(dress_sig)
+            if request or romantic_swim:
+                for record in ES_AI_SHOWN:
+                    if record["id"] == active:
+                        record.update(dress_reason="player" if request else "romantic_choice", dress_location=ES_AI_LOC_CUR[0])
             es_ai_log("dress -> %s (%s)" % (ES_AI_DRESS[0], dress_sig))
         es_ai_log("live-chain-20261011 applied active=%s location=%s party=%s dress=%r shown=%r" %
                   (ES_AI_LOC_LAST_CHAR[0], ES_AI_LOC_CUR[0], ES_AI_PARTY[0], ES_AI_DRESS[0],
@@ -838,10 +960,18 @@ init -10 python:
         cid = ES_AI_LOC_LAST_CHAR[0]
         player = unicode(player_text or u"").lower()
         answer = unicode(reply or u"").lower()
+        roster = globals().get("ES_AI_SHOWN")
+        if roster is None or any(g.get("id") != cid for g in roster) or not any(g.get("id") == cid for g in roster):
+            return False
+        if globals().get("ES_AI_CAMEO_NEARBY", {}).get(ES_AI_LOC_CUR[0]):
+            return False
+        stems = {"sl": u"слав", "mz": u"жен", "un": u"лен", "mi": u"мику", "dv": u"алис", "us": u"ульян", "mt": u"ольг", "cs": u"виол", "uv": u"юл"}
+        if any(key != cid and re.search(u"\\b(?:" + stem + u"\\w*|" + key + u")\\b", player, re.UNICODE) for key, stem in stems.items()):
+            return False
         # Affection alone is not an outfit request; require a voluntary clothing reply.
         return (cid in ES_AI_ROMANCEABLE and cid not in ("us", "uv")
                 and cid in es_ai_cameo_adult_home_ids()
-                and bool(es_ai_location().get("romantic"))
+                and not es_ai_clothing_refused(answer)
                 and bool(re.search(u"\\b(?:поцелу\\w*|обним\\w*|люблю тебя|свидание)\\b", player, re.UNICODE))
                 and not bool(re.search(u"\\b(?:не|нет|not)\\b|[?]", player + u" " + answer, re.UNICODE))
                 and bool(re.search(u"\\b(?:да|хочу|согласна|давай)\\b", answer, re.UNICODE))
@@ -874,7 +1004,7 @@ init -10 python:
             sig = unicode(sig or u"").strip().lower()
         except Exception:
             sig = str(sig or "").strip().lower()
-        table = {u"swim": "swim", u"купальник": "swim", u"купаться": "swim",
+        table = {u"swim": "swim", u"купальник": "swim", u"бикини": "swim", u"bikini": "swim", u"swimsuit": "swim", u"купаться": "swim",
                  u"dress": "dress", u"party": "dress", u"платье": "dress",
                  u"sport": "sport", u"спорт": "sport", u"спортивн": "sport",
                  u"cover": "cover", u"форма": "cover", u"форму": "cover",
@@ -884,6 +1014,10 @@ init -10 python:
             return
         if val == "dress" and not es_ai_has_party_dress(ES_AI_LOC_LAST_CHAR[0]):
             return
+        if val != "cover":
+            for record in ES_AI_SHOWN:
+                if record["id"] == ES_AI_LOC_LAST_CHAR[0]:
+                    record.pop("cover_choice", None)
         if ES_AI_DRESS[0] != val:
             ES_AI_DRESS[0] = val
             if ES_AI_SHOWN:
@@ -926,8 +1060,8 @@ init -10 python:
 
         Возвращает 'swim' / 'cover' / None (None — оставить как есть).
         У воды купальник и так базовый, поэтому здесь важнее обратный случай:
-        похолодало/серьёзный разговор -> вернуть форму; а в романтических
-        локациях или вечером интимный настрой -> купальник.
+        похолодало/серьёзный разговор -> вернуть форму.
+        Privacy and affection alone never authorize a clothing change.
         """
         request = es_ai_cameo_clothing_request(ES_AI_LOC_LAST_CHAR[0], player_text, unnamed=True)
         if request:
@@ -935,7 +1069,7 @@ init -10 python:
         if loc.get("id") == "beach" and es_ai_clothing_night() and es_ai_no_swimming(player_text):
             return "cover"
         import re
-        if re.search(u"\\bне\\s+(?:надень|надевай|переоденься|оденься|прикройся)\\b", unicode(player_text or u"").lower()):
+        if re.search(u"\\bне\\s+(?:надень|надевай|переоденься|переодевайся|оденься|прикройся)\\b", unicode(player_text or u"").lower(), re.UNICODE):
             return None
         if ES_AI_PARTY[0] and ES_AI_DRESS[0] not in ("cover", "swim", "sport"):
             return "dress"
@@ -945,16 +1079,8 @@ init -10 python:
             return None
         if any(w in combined for w in ES_AI_DRESS_SWIM_WORDS):
             return "swim"
-        if any(w in combined for w in ES_AI_DRESS_COVER_WORDS):
+        if any(re.search(u"\\b" + re.escape(w), combined, re.UNICODE) for w in ES_AI_DRESS_COVER_WORDS):
             return "cover"
-        # Романтическое переодевание — только для романсибельных (совершеннолетних)
-        # героинь. Для Ульяны (ребёнок) романтический переход в купальник запрещён.
-        romantic_place = bool(loc.get("romantic")) or ES_AI_TIME[0] in ("sunset", "night")
-        if loc.get("id") == "beach" and es_ai_clothing_night():
-            return None
-        if (romantic_place and es_ai_char_id in ES_AI_ROMANCEABLE
-                and any(w in combined for w in ES_AI_DRESS_ROMANTIC_WORDS)):
-            return "swim"
         return None
 
     def es_ai_neighbors_text():
@@ -983,7 +1109,7 @@ init 10 python:
         es_ai_set_location(loc_id, char_id=ES_AI_LOC_LAST_CHAR[0],
                            emotion=ES_AI_LOC_LAST_EMO[0])
 
-    def es_ai_set_location(loc_id, char_id=None, emotion=None, cameo_arrive=True, travel_all=False, travel_with=None):
+    def es_ai_set_location(loc_id, char_id=None, emotion=None, cameo_arrive=True, travel_all=False, travel_with=None, keep_primary_clothes=False):
         """Сменить локацию: фон + вернуть героиню в подходящей одежде."""
         loc = ES_AI_LOCATION_INDEX.get(loc_id)
         if not loc:
@@ -1006,7 +1132,10 @@ init 10 python:
                     es_ai_cameo_park(g["id"], announce=False)
             for g in ES_AI_SHOWN:
                 es_ai_cameo_take_nearby(g["id"])
-            ES_AI_DRESS[0] = None
+                if not isinstance(travel_with, (_es_ai_cameo_builtins.list, _es_ai_cameo_builtins.tuple)):
+                    g.pop("travel_party", None)
+            primary_cover = keep_primary_clothes or any(g["id"] == ES_AI_LOC_LAST_CHAR[0] and g.get("cover_choice") for g in ES_AI_SHOWN)
+            ES_AI_DRESS[0] = "cover" if primary_cover else None
             try:
                 ES_AI_RECENT_LINES[:] = []
             except Exception:
@@ -1015,8 +1144,8 @@ init 10 python:
         if changed:
             for g in ES_AI_SHOWN:
                 if g.get("cameo"):
-                    g["dress"] = es_ai_cameo_dress()
-                    g["dress_reason"] = "location"
+                    g["dress"] = es_ai_cameo_dress(record=g) if g.get("cover_choice") else es_ai_cameo_dress()
+                    g["dress_reason"] = "cover_choice" if g.get("cover_choice") else "location"
                     g["dress_location"] = loc["id"]
             if ES_AI_SHOWN:
                 es_ai_recent_push("Narrator", "The company moved together to %s: %s." %

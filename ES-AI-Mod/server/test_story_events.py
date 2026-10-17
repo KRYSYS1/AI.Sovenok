@@ -39,6 +39,12 @@ class StoryTests(unittest.TestCase):
     def token(self, manager, readonly=False):
         return manager.prepare(OPTIONS, ["un", "sl", "mt"], "un", readonly)
 
+    def delivered(self, mod, response):
+        self.assertTrue(response['ok'])
+        if 'story_ack' in response:
+            mod.manager.acknowledge_direct([response['story_ack']])
+        return response
+
     def offer(self, manager):
         for _ in range(400):
             token = self.token(manager)
@@ -60,8 +66,8 @@ class StoryTests(unittest.TestCase):
                 self.assertIsNone(mod.prepare({"enabled": False}))
             self.assertIsNone(manager.state)
             self.assertFalse(os.path.exists(manager.path))
-            self.assertEqual(mod.settings(None), dict(enabled=False, intensity="low"))
-            self.assertEqual(mod.settings(dict(enabled="true", intensity=[])), dict(enabled=False, intensity="low"))
+            self.assertEqual(mod.settings(None), dict(enabled=False, choices_enabled=False, intensity="low"))
+            self.assertEqual(mod.settings(dict(enabled="true", intensity=[])), dict(enabled=False, choices_enabled=False, intensity="low"))
             for key, value in (("enabled", 1), ("intensity", "max"), ("reset", True)):
                 self.assertFalse(mod.valid_setting(key, value))
             config = types.SimpleNamespace(user_data_dir=lambda: self.temp.name)
@@ -69,6 +75,81 @@ class StoryTests(unittest.TestCase):
                 self.assertEqual(mod.default_path(), os.path.join(self.temp.name, "story_events.json"))
             with patch.dict(sys.modules, config_loader=types.SimpleNamespace()):
                 self.assertEqual(mod.default_path(), os.path.join(root, "memory", "story_events.json"))
+
+    def test_missing_malformed_and_incomplete_offer_retry_survives_restart(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            for raw in ('Ordinary reply', 'Reply [story:{bad}]',
+                        'Reply [story:{"status":"offered","title":"Incomplete"}]'):
+                with self.subTest(root=root, raw=raw):
+                    mod = module(root)
+                    manager = self.manager(mod)
+                    manager._load()
+                    manager.state.update(turns=4, version=4, status="inactive", offer_due=False)
+                    config = dict(enabled=True, intensity="high")
+                    token = manager.prepare(config, ["un"], "un")
+                    self.assertTrue(token["eligible"])
+                    reply, update = mod.parse_tags(raw)
+                    self.assertTrue(manager.commit(token, update, reply))
+                    self.assertEqual(manager.state["status"], "inactive")
+                    self.assertTrue(manager.state["offer_due"])
+                    restarted = mod.StoryManager(manager.path)
+                    retry = restarted.prepare(config, ["un"], "un")
+                    self.assertTrue(retry["eligible"])
+                    self.assertEqual(restarted.state["turns"], 5)
+                    self.assertTrue(restarted.commit(retry, dict(status="offered", title="Camp task",
+                                                               summary="Find a notebook"), "Will you help?"))
+                    self.assertFalse(restarted.state["offer_due"])
+                    self.assertFalse(restarted.prepare(config, ["un"], "un")["eligible"])
+
+    def test_legacy_inactive_bounded_wait_and_high_turn16_due_without_writes(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            for intensity, bound in (("high", 8), ("medium", 12), ("low", 20)):
+                manager = self.manager(mod)
+                legacy = dict(version=16, turns=16 if intensity == "high" else bound,
+                              closed_turn=0, status="inactive")
+                with open(manager.path, "w", encoding="utf-8") as stream:
+                    json.dump(legacy, stream)
+                with patch.object(mod.os, "replace", side_effect=AssertionError("prepare wrote state")):
+                    config = dict(enabled=True, intensity=intensity)
+                    self.assertTrue(manager.prepare(config, ["un"], "un")["eligible"])
+                    self.assertFalse(manager.prepare(config, ["un"], "un", True)["eligible"])
+                with open(manager.path, encoding="utf-8") as stream:
+                    self.assertEqual(json.load(stream), legacy)
+                manager.state.update(turns=0)
+                self.assertFalse(manager.prepare(config, ["un"], "un")["eligible"])
+
+    def test_retry_requires_successful_fresh_player_exchange_and_respects_refusal(self):
+        for root in existing_paths((DEV, WORKSHOP)):
+            mod = module(root)
+            manager = self.manager(mod)
+            manager._load()
+            manager.state.update(turns=4, version=4)
+            config = dict(enabled=True, intensity="high")
+            token = manager.prepare(config, ["un"], "un")
+            self.assertFalse(manager.commit(token, None, ""))
+            self.assertFalse(manager.commit(token, None, "Greeting", False))
+            with patch.object(mod.os, "replace", side_effect=OSError("disk full")):
+                self.assertFalse(manager.commit(token, None, "Reply"))
+            self.assertFalse(manager.state["offer_due"])
+            manager.state.update(version=5)
+            manager.commit(token, None, "Stale reply")
+            self.assertFalse(manager.state["offer_due"])
+            manager.state.update(turns=16)
+            manager.commit(manager.prepare(config, ["un"], "un"),
+                           dict(status="offered", title="Task", summary="Find notebook"), "Will you help?")
+            manager.commit(manager.prepare(config, ["un"], "un"), None, "No pressure", player_text="No thanks")
+            self.assertEqual(manager.state["status"], "declined")
+            self.assertFalse(manager.state["offer_due"])
+            closed = manager.state["closed_turn"]
+            for elapsed in range(10):
+                manager.state["turns"] = closed + elapsed
+                self.assertFalse(manager.prepare(config, ["un"], "un")["eligible"])
+            # Refusal uses the original lottery again, not the inactive overdue fallback.
+            manager.state.update(turns=closed + 10)
+            expected = (manager.state["turns"] % 4 == 0 and
+                        int(mod.hashlib.sha256(("story:%s" % manager.state["turns"]).encode()).hexdigest()[:8], 16) / 2**32 < .55)
+            self.assertEqual(manager.prepare(config, ["un"], "un")["eligible"], expected)
 
     def test_tags_balanced_bounded_and_independent(self):
         for root in existing_paths((DEV, WORKSHOP)):
@@ -191,10 +272,10 @@ class StoryTests(unittest.TestCase):
             env, llm, _, modules = self.endpoint_env(root, mod, True)
             with patch.dict(sys.modules, modules):
                 llm.chat.return_value = 'Hi [story:{"status":"active","summary":"Player agreed"}]'
-                self.assertTrue(env["chat"](dict(text="Yes, I will help"))["ok"])
+                self.delivered(mod, env["chat"](dict(text="Yes, I will help")))
                 self.assertEqual(mod.manager.state["status"], "active")
                 llm.chat.return_value = 'No pressure [story:{"status":"active","notes":"Wrong"}]'
-                self.assertTrue(env["chat"](dict(text="Stop this story"))["ok"])
+                self.delivered(mod, env["chat"](dict(text="Stop this story")))
                 self.assertEqual(mod.manager.state["status"], "declined")
                 self.assertEqual(mod.manager.state["summary"], "Player agreed")
                 before = dict(mod.manager.state)
@@ -217,12 +298,14 @@ class StoryTests(unittest.TestCase):
                         out = env["chat"](dict(text="Hello", character="un", location="square"))
                         self.assertTrue(out["ok"])
                         self.assertEqual(out["reply"], "Hi")
-                        self.assertEqual(out["dress"], "swim")
+                        self.assertIsNone(out.get("dress"))  # Unsolicited inland model tag is not consent.
                         llm.chat.assert_called_once()
                         conversation.add_exchange.assert_called_once_with("un", "Hello", "Hi")
                         prompt = llm.chat.call_args.args[0][0]["content"]
                         self.assertEqual("OPTIONAL CAMP STORY" in prompt, enabled)
                         if enabled:
+                            self.assertEqual(mod.manager.state["turns"], 0)
+                            self.delivered(mod, out)
                             self.assertEqual(mod.manager.state["turns"], 1)
                             self.assertEqual(mod.manager.state["status"], "inactive")
                         else:
@@ -266,7 +349,7 @@ class StoryTests(unittest.TestCase):
                 modules["config_loader"].save_config.assert_not_called()
                 for key, value in (("enabled", True), ("intensity", "high")):
                     self.assertTrue(env["config_set"](dict(section="story_events", key=key, value=value))["ok"])
-                self.assertEqual(env["cfg"]["story_events"], dict(enabled=True, intensity="high"))
+            self.assertEqual(env["cfg"]["story_events"], dict(enabled=True, choices_enabled=False, intensity="high"))
 
     def test_decision_detector_clear_refusals(self):
         for root in existing_paths((DEV, WORKSHOP)):
@@ -331,11 +414,11 @@ class StoryTests(unittest.TestCase):
                 self.assertEqual(manager.state["status"], "offered")
                 self.assertEqual(manager.state["summary"], "Find a notebook")
                 self.assertEqual(manager.state["turns"], turns + 1)
-            manager.commit(self.token(manager), None, "Reply", player_text="Yes")
-            self.assertEqual(manager.state["status"], "offered")  # Acceptance alone cannot invent a model update.
             manager.commit(self.token(manager), dict(status="offered", summary="Explained the task"),
                            "Reply", player_text="Tell me more")
             self.assertEqual(manager.state["summary"], "Explained the task")
+            manager.commit(self.token(manager), None, "Reply", player_text="Yes")
+            self.assertEqual(manager.state["status"], "active")  # Explicit consent does not depend on model metadata.
             manager.commit(self.token(manager), dict(status="active", summary="Agreed"), "Reply", player_text="\u044f \u043f\u043e\u043c\u043e\u0433\u0443")
             self.assertEqual(manager.state["status"], "active")
             manager.commit(self.token(manager), None, "Reply", player_text="No thanks")
@@ -389,6 +472,8 @@ class StoryTests(unittest.TestCase):
                             conversation.add_exchange.reset_mock()
                             llm.chat.return_value = model_reply
                             out = env["chat"](dict(text=text))
+                            self.assertEqual(mod.manager.state, before)
+                            self.delivered(mod, out)
                         self.assertTrue(out["ok"])
                         llm.chat.assert_called_once()
                         self.assertEqual(mod.manager.state["status"], expected)
@@ -422,13 +507,13 @@ class StoryTests(unittest.TestCase):
                 with patch.dict(sys.modules, modules):
                     for text in ("let's find a notebook", "let's find a note?", "I don't want to go there"):
                         llm.chat.return_value = 'Reply [story:{"status":"active","summary":"Wrong"}]'
-                        self.assertTrue(env["chat"](dict(text=text))["ok"])
+                        self.delivered(mod, env["chat"](dict(text=text)))
                         self.assertEqual(mod.manager.state["status"], "offered")
                     llm.chat.return_value = 'Reply [story:{"status":"active"}]'
-                    self.assertTrue(env["chat"](dict(text="\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u043a\u0443"))["ok"])
+                    self.delivered(mod, env["chat"](dict(text="\u043f\u043e\u0439\u0434\u0451\u043c \u0438\u0441\u043a\u0430\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u043a\u0443")))
                     self.assertEqual(mod.manager.state["status"], "active")
                     llm.chat.return_value = "No pressure"
-                    self.assertTrue(env["chat"](dict(text="\u0434\u0430\u0432\u0430\u0439 \u043f\u0440\u0435\u043a\u0440\u0430\u0442\u0438\u043c \u043f\u043e\u0438\u0441\u043a\u0438"))["ok"])
+                    self.delivered(mod, env["chat"](dict(text="\u0434\u0430\u0432\u0430\u0439 \u043f\u0440\u0435\u043a\u0440\u0430\u0442\u0438\u043c \u043f\u043e\u0438\u0441\u043a\u0438")))
                     self.assertEqual(mod.manager.state["status"], "declined")
                     self.assertEqual(mod.manager.state["summary"], "Search for a note")
                     self.assertEqual(llm.chat.call_count, 5)
